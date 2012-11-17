@@ -4,6 +4,8 @@
 #include "pds/service/TaskObject.hh"
 #include "pds/service/Routine.hh"
 #include "pds/utility/NullServer.hh"
+#include "pds/utility/Occurrence.hh"
+#include "pds/utility/OccurrenceId.hh"
 #include "pds/epicstools/PVWriter.hh"
 
 #include "pdsdata/xtc/TypeId.hh"
@@ -353,12 +355,14 @@ InDatagram* TimeToolA::events(InDatagram* dg)
 }
 
 Occurrence* TimeToolA::occurrences(Occurrence* occ) {
-  const EvrCommand& cmd = *reinterpret_cast<const EvrCommand*>(occ);
-  if (cmd.code == _fex->event_code_bykik())
-    _bykik    |= 1<<(cmd.seq.stamp().vector()&0x1f);
-  if (cmd.code == _fex->event_code_no_laser())
-    _no_laser |= 1<<(cmd.seq.stamp().vector()&0x1f);
-  return 0;
+  if (occ->id() == OccurrenceId::EvrCommand) {
+    const EvrCommand& cmd = *reinterpret_cast<const EvrCommand*>(occ);
+    if (cmd.code == _fex->event_code_bykik())
+      _bykik    |= 1<<(cmd.seq.stamp().vector()&0x1f);
+    if (cmd.code == _fex->event_code_no_laser())
+      _no_laser |= 1<<(cmd.seq.stamp().vector()&0x1f);
+  }
+  return occ;
 }
 
 //

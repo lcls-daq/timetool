@@ -122,7 +122,9 @@ void Fex::configure()
         continue;
       const char* delim = " \t\n";
       char* name = strtok(linep,delim);
+      if (!name) continue;
       char* arg  = strtok(0,delim);
+      if (!arg) continue;
       unsigned v_ul = strtoul(arg,&pEnd,0);
       double   v_db = strtod (arg,&pEnd);
       if      (strcasecmp(name,"base_name")==0)  _base_name= string(arg);
