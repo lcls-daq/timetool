@@ -196,15 +196,20 @@ void TimeToolM::clear    ()
 //
 //  Create all plot entries
 //
+static EntryTH1F* one_evt(DescTH1F d) {
+  d.aggregate(false);
+  return new EntryTH1F(d);
+}
+
 void TimeToolM::create   (Cds& cds)
 {
   _cds = &cds; 
 
-  _ref_signal  = new EntryTH1F(DescTH1F("Ref Signal#Signal#0#0#0"     ,"ADU","Bin",cols,0.,double(cols)));
-  _raw_signal  = new EntryTH1F(DescTH1F("Raw Signal#Signal#0#0#c0"    ,"ADU","Bin",cols,0.,double(cols)));
-  _sub_signal  = new EntryTH1F(DescTH1F("Sub Signal#Signal#1#0#c0"    ,"ADU","Bin",cols,0.,double(cols)));
-  _sub_signal_u  = new EntryTH1F(DescTH1F("Sub Signal U#Signal#1#0#c000"    ,"ADU","Bin",cols,0.,double(cols)));
-  _flt_signal  = new EntryTH1F(DescTH1F("Flt Signal#Signal#1#0#c00000","ADU","Bin",cols,0.,double(cols)));
+  _ref_signal  = one_evt(DescTH1F("Ref Signal#Signal#0#0#0"     ,"ADU","Bin",cols,0.,double(cols)));
+  _raw_signal  = one_evt(DescTH1F("Raw Signal#Signal#0#0#c0"    ,"ADU","Bin",cols,0.,double(cols)));
+  _sub_signal  = one_evt(DescTH1F("Sub Signal#Signal#1#0#c0"    ,"ADU","Bin",cols,0.,double(cols)));
+  _sub_signal_u  = one_evt(DescTH1F("Sub Signal U#Signal#1#0#c000"    ,"ADU","Bin",cols,0.,double(cols)));
+  _flt_signal  = one_evt(DescTH1F("Flt Signal#Signal#1#0#c00000","ADU","Bin",cols,0.,double(cols)));
 
   _p0corr      = new EntryScan(DescScan("P0#Reference","Reference","Signal",100));
   _p1corr      = new EntryScan(DescScan("P1#Reference","Reference","Signal",100));
