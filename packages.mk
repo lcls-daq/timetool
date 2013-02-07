@@ -1,2 +1,2 @@
 # List of packages (low level first)
-packages := ami app sim
+packages := ami app event sim

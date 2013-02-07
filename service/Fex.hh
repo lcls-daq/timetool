@@ -6,6 +6,8 @@
 #include "RefCorr.hh"
 #include "Fit.hh"
 
+#include "pdsdata/xtc/Src.hh"
+
 #include <string>
 using std::string;
 
@@ -62,7 +64,10 @@ namespace TimeTool {
 
     unsigned _event_code_bykik;;
     unsigned _event_code_no_laser;;
-	
+
+    Pds::Src _ipm_no_beam_src;
+    float    _ipm_no_beam_threshold;
+
     double   _calib_p0;
     double   _calib_p1;
     double   _calib_p2;

@@ -9,6 +9,7 @@
 namespace Pds { 
   namespace Opal1k  { class ConfigV1; } 
   namespace EvrData { class DataV3; } 
+  namespace Lusi    { class IpmFexV1; } 
   namespace Camera  { class FrameV1; } 
 };
 
@@ -59,6 +60,7 @@ namespace Ami {
 
     Pds::Camera::FrameV1* _frame;
     Pds::EvrData::DataV3* _evrdata;
+    Pds::Lusi::IpmFexV1* _ipmdata;
 
     int _id_sig;
     int _id_sb;

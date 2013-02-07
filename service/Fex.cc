@@ -2,6 +2,8 @@
 
 #include "pdsdata/camera/FrameV1.hh"
 #include "pdsdata/opal1k/ConfigV1.hh"
+#include "pdsdata/xtc/DetInfo.hh"
+#include "pdsdata/xtc/BldInfo.hh"
 
 #include <list>
 
@@ -104,6 +106,7 @@ void Fex::configure()
   _adjust_stats = 0;
   _write_image       = true;
   _write_projections = false;
+  _ipm_no_beam_src   = Pds::DetInfo("None");
 
   char buff[128];
   const char* dir = getenv("HOME");
@@ -128,9 +131,26 @@ void Fex::configure()
       unsigned v_ul = strtoul(arg,&pEnd,0);
       double   v_db = strtod (arg,&pEnd);
       if      (strcasecmp(name,"base_name")==0)  _base_name= string(arg);
-      else if (strcasecmp(name,"phy")==0)        _phy      = v_ul;
+      else if (strcasecmp(name,"phy")==0) {
+	if (v_ul) _phy = v_ul;
+	else {
+	  Pds::DetInfo det(arg);
+	  if (det.detector()<Pds::DetInfo::NumDetector)
+	    _phy = det.phy();
+	  else
+	    _phy = Pds::BldInfo(arg).phy();
+	}
+      }
       else if (strcasecmp(name,"event_code_bykik")==0)    _event_code_bykik  = v_ul;
       else if (strcasecmp(name,"event_code_no_laser")==0) _event_code_no_laser  = v_ul;
+      else if (strcasecmp(name,"ipm_no_beam")==0) {
+	Pds::DetInfo det(arg);
+	if (det.detector()<Pds::DetInfo::NumDetector)
+	  _ipm_no_beam_src = det;
+	else
+	  _ipm_no_beam_src = Pds::BldInfo(arg);
+      }
+      else if (strcasecmp(name,"ipm_no_beam_threshold")==0) _ipm_no_beam_threshold  = v_db;
       else if (strcasecmp(name,"calib_p0")==0)    _calib_p0  = v_db;
       else if (strcasecmp(name,"calib_p1")==0)    _calib_p1  = v_db;
       else if (strcasecmp(name,"calib_p2")==0)    _calib_p2  = v_db;

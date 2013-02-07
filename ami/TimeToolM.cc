@@ -14,6 +14,7 @@
 #include "pdsdata/camera/FrameV1.hh"
 #include "pdsdata/opal1k/ConfigV1.hh"
 #include "pdsdata/evr/DataV3.hh"
+#include "pdsdata/lusi/IpmFexV1.hh"
 
 using namespace Ami;
 
@@ -98,6 +99,7 @@ TimeToolM::TimeToolM() :
   _fex(new FexM),
   _frame    (0),
   _evrdata  (0),
+  _ipmdata  (0),
   _sig_wf   (0),
   _sb_wf    (0),
   _ref_wf   (0),
@@ -112,6 +114,16 @@ void TimeToolM::reset(Ami::FeatureCache& cache)
 {
   _cache = &cache;
   _fex->configure();
+
+  if (_cds) {
+    int index = _cache->add(_fex->base_name()+":AMI:AMPL"); 
+    _cache->add(_fex->base_name()+":AMI:FLTPOS"); 
+    _cache->add(_fex->base_name()+":AMI:FLTPOS_PS"); 
+    _cache->add(_fex->base_name()+":AMI:FLTPOSFWHM"); 
+    _cache->add(_fex->base_name()+":AMI:AMPLNXT"); 
+    _cache->add(_fex->base_name()+":AMI:REFAMPL"); 
+    _cache_index = index;
+  }
 }
 
 void TimeToolM::clock    (const Pds::ClockTime& clk) { _clk=clk; }
@@ -146,8 +158,8 @@ void TimeToolM::configure(const Pds::Src&       src,
 //  Capture pointer to detector data we want
 //
 void TimeToolM::event    (const Pds::Src&       src,
-                         const Pds::TypeId&    type,
-                         void*                 payload) 
+			  const Pds::TypeId&    type,
+			  void*                 payload) 
 {
   if (src.phy()==_fex->_phy) {
     if (type.id()==Pds::TypeId::Id_Frame)
@@ -165,6 +177,10 @@ void TimeToolM::event    (const Pds::Src&       src,
   else if (type.id()==Pds::TypeId::Id_EvrData) {
     _evrdata = reinterpret_cast<Pds::EvrData::DataV3*>(payload);
   }
+  else if (src.level()==_fex->_ipm_no_beam_src.level() && 
+	   src.phy  ()==_fex->_ipm_no_beam_src.phy  () &&
+	   type.id  ()==Pds::TypeId::Id_IpmFex)
+    _ipmdata = reinterpret_cast<Pds::Lusi::IpmFexV1*>(payload);
 }
 
 //
@@ -192,6 +208,8 @@ void TimeToolM::clear    ()
 
   _fex->configure();
 }
+
+static DescTH1F no_agg(DescTH1F d) { d.aggregate(false); return d; }
 
 //
 //  Create all plot entries
@@ -268,12 +286,18 @@ void TimeToolM::analyze  ()
       if (int(_fex->_event_code_no_laser) < 0)
         no_laser = !no_laser;
 
+      if (_ipmdata) {
+	if (_ipmdata->sum < _fex->_ipm_no_beam_threshold)
+	  bykik = true;
+      }
+
       bool lpass = _fex->write_image() && _frame;
       if (lpass)
         _fex->analyze(*_frame, bykik, no_laser);
-      else if ((lpass = _fex->write_projections() && _sig_wf)) {
+      else if ((lpass = _fex->write_projections() && _sig_wf))
         _fex->analyze(_sig_wf, _sb_wf, _ref_wf, bykik, no_laser);
-      }
+      else if ((lpass = _frame))
+        _fex->analyze(*_frame, bykik, no_laser);
 
       if (lpass) {
 
@@ -307,6 +331,7 @@ void TimeToolM::analyze  ()
   //  Reset pointer references
   _frame = 0;
   _evrdata = 0;
+  _ipmdata = 0;
   _sig_wf = 0;
   _sb_wf  = 0;
   _ref_wf = 0;
