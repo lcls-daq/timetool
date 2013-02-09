@@ -126,7 +126,14 @@ void TimeToolM::reset(Ami::FeatureCache& cache)
   }
 }
 
-void TimeToolM::clock    (const Pds::ClockTime& clk) { _clk=clk; }
+void TimeToolM::clock    (const Pds::ClockTime& clk) 
+{
+//   if (clk.seconds() > _clk.seconds() &&
+//       (clk.seconds()&0xf)==0)
+//     recreate();
+
+  _clk=clk; 
+}
 
 //
 //  Cache the configuration for camera
@@ -248,6 +255,7 @@ void TimeToolM::create   (Cds& cds)
     _cache->add(_fex->base_name()+":AMI:AMPLNXT"); 
     _cache->add(_fex->base_name()+":AMI:REFAMPL"); 
     _cache_index = index;
+    printf("TimeToolM::create _cache_index=%d\n",index);
   }
   else
     printf("TimeToolM::create _cache==0\n");
