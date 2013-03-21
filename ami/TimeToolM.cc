@@ -216,7 +216,9 @@ void TimeToolM::clear    ()
   _fex->configure();
 }
 
+#if 0
 static DescTH1F no_agg(DescTH1F d) { d.aggregate(false); return d; }
+#endif
 
 //
 //  Create all plot entries
