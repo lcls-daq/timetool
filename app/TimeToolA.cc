@@ -28,6 +28,7 @@
 #include "timetool/service/Fex.hh"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string>
 #include <new>
 

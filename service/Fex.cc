@@ -7,6 +7,10 @@
 
 #include <list>
 
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
 using namespace TimeTool;
 
 static const int   cols  = Pds::Opal1k::ConfigV1::Column_Pixels;
@@ -176,7 +180,7 @@ void Fex::configure()
         _ref_corr.set_period(v_ul);
       else if (strcasecmp(name,"nwts")==0) {
         _nwts     = v_ul;
-        if (_wts) delete _wts;
+        if (_wts) delete[] _wts;
         _wts      = new double[_nwts];
         for(int i=0; i<int(_nwts); i++) {
           getline(&linep, &sz, f);

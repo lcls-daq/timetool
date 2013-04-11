@@ -24,6 +24,7 @@ using namespace Ami;
 #include "pdsdata/epics/EpicsPvData.hh"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string>
 
 using std::string;

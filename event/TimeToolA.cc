@@ -20,6 +20,7 @@
 #include "pdsdata/epics/EpicsPvData.hh"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string>
 #include <new>
 
