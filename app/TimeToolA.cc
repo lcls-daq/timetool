@@ -277,6 +277,7 @@ namespace Pds {
       return 1;
     }
     unsigned event_code_bykik   () const { return _fex._event_code_bykik; }
+    unsigned event_code_alkik   () const { return _fex._event_code_alkik; }
     unsigned event_code_no_laser() const { return _fex._event_code_no_laser; }
     void setup(bool bykik, bool no_laser) { _bykik=bykik; _no_laser=no_laser; }
   private:
@@ -358,7 +359,8 @@ InDatagram* TimeToolA::events(InDatagram* dg)
 Occurrence* TimeToolA::occurrences(Occurrence* occ) {
   if (occ->id() == OccurrenceId::EvrCommand) {
     const EvrCommand& cmd = *reinterpret_cast<const EvrCommand*>(occ);
-    if (cmd.code == _fex->event_code_bykik())
+    if (cmd.code == _fex->event_code_bykik() ||
+        cmd.code == _fex->event_code_alkik())
       _bykik    |= 1<<(cmd.seq.stamp().vector()&0x1f);
     if (cmd.code == _fex->event_code_no_laser())
       _no_laser |= 1<<(cmd.seq.stamp().vector()&0x1f);

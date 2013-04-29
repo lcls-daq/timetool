@@ -62,8 +62,9 @@ namespace TimeTool {
     unsigned _adjust_stats;
     string   _adjust_pv;
 
-    unsigned _event_code_bykik;;
-    unsigned _event_code_no_laser;;
+    unsigned _event_code_bykik;
+    unsigned _event_code_alkik;
+    unsigned _event_code_no_laser;
 
     Pds::Src _ipm_no_beam_src;
     float    _ipm_no_beam_threshold;

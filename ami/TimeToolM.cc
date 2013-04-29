@@ -288,7 +288,8 @@ void TimeToolM::analyze  ()
       unsigned laser_code = abs(_fex->_event_code_no_laser);
       for(unsigned i=0; i<_evrdata->numFifoEvents(); i++) {
         const EvrDataType::FIFOEvent& fe = _evrdata->fifoEvent(i);
-        if (fe.EventCode == _fex->_event_code_bykik)
+        if (fe.EventCode == _fex->_event_code_bykik ||
+            fe.EventCode == _fex->_event_code_alkik)
           bykik = true;
         if (fe.EventCode == laser_code)
           no_laser = true;

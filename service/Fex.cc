@@ -64,6 +64,7 @@ static void project_spectrumY(const Pds::Camera::FrameV1& frame,
 Fex::Fex(const char* fname) :
   _fname   (fname), 
   _event_code_bykik(162), 
+  _event_code_alkik(163), 
   _event_code_no_laser(0),
   _calib_p0(0),
   _calib_p1(0),
