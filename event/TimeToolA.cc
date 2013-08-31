@@ -4,20 +4,17 @@
 #include "pdsdata/xtc/Xtc.hh"
 #include "pdsdata/xtc/Dgram.hh"
 #include "pdsdata/xtc/TransitionId.hh"
-#include "pdsdata/opal1k/ConfigV1.hh"
-#include "pdsdata/evr/DataV3.hh"
+#include "pdsdata/psddl/opal1k.ddl.h"
+#include "pdsdata/psddl/evr.ddl.h"
 #include "pdsdata/xtc/DetInfo.hh"
 #include "pdsdata/xtc/ProcInfo.hh"
 
-#include "pdsdata/camera/FrameV1.hh"
-#include "pdsdata/opal1k/ConfigV1.hh"
-#include "pdsdata/evr/DataV3.hh"
-#include "pdsdata/lusi/IpmFexV1.hh"
+#include "pdsdata/psddl/camera.ddl.h"
+#include "pdsdata/psddl/lusi.ddl.h"
+
+#include "pdsdata/psddl/epics.ddl.h"
 
 #include "pds/epicstools/PVWriter.hh"
-#include "alarm.h"
-#include "pdsdata/epics/EpicsDbrTools.hh"
-#include "pdsdata/epics/EpicsPvData.hh"
 
 #include <math.h>
 #include <stdlib.h>
@@ -36,10 +33,19 @@ static void _insert_pv(InDatagram* dg,
                        int         id,
                        const string& name)
 {
-  Pds::EpicsPvCtrlHeader payload(id,DBR_CTRL_DOUBLE,1,name.c_str());
+  unsigned sz = sizeof(Pds::Epics::EpicsPvCtrlDouble)+sizeof(double);
+  sz = (sz+3)&~3;
+
+  double data(0);
+  char* p = new char[sz];
+
+  Pds::Epics::dbr_ctrl_double ctrl; memset(&ctrl, 0, sizeof(ctrl));
+  new(p) Pds::Epics::EpicsPvCtrlDouble(id,DBR_CTRL_DOUBLE,1,name.c_str(),ctrl,&data);
+  
   Xtc xtc(TypeId(TypeId::Id_Epics,1),src);
-  xtc.extent += (sizeof(payload)+3)&(~3);
-  dg->insert(xtc, &payload);
+  xtc.extent += sz;
+  dg->insert(xtc, p);
+  delete[] p;
 }
 
 static void _insert_pv(InDatagram* dg,
@@ -47,14 +53,19 @@ static void _insert_pv(InDatagram* dg,
                        int         id,
                        double      val)
 {
-  //  Pds::Epics::dbr_time_double v;
-  dbr_time_double v;
+  Pds::Epics::dbr_time_double v;
   memset(&v,0,sizeof(v));
-  v.value = val;
-  Pds::EpicsPvTime<DBR_DOUBLE> payload(id,1,&v);
+  
+  unsigned sz = sizeof(Pds::Epics::EpicsPvTimeDouble)+sizeof(double);
+  sz = (sz+3)&~3;
+
+  char* p = new char[sz];
+  new(p) Pds::Epics::EpicsPvTimeDouble(id,DBR_TIME_DOUBLE,1,v,&val);
+
   Xtc xtc(TypeId(TypeId::Id_Epics,1),src);
-  xtc.extent += (sizeof(payload)+3)&(~3);
-  dg->insert(xtc, &payload);
+  xtc.extent += sz;
+  dg->insert(xtc, p);
+  delete[] p;
 }
 
 static void _insert_projection(InDatagram* dg,
@@ -63,10 +74,20 @@ static void _insert_projection(InDatagram* dg,
 			       const string& name)
 {
   const int wf_size=1024;
-  Pds::EpicsPvCtrlHeader payload(id,DBR_CTRL_LONG,wf_size,name.c_str());
+  unsigned sz = sizeof(Pds::Epics::EpicsPvCtrlLong)+wf_size*sizeof(unsigned);
+  sz = (sz+3)&~3;
+  char* p = new char[sz];
+
+  Pds::Epics::dbr_ctrl_long ctrl; memset(&ctrl, 0, sizeof(ctrl));
+  int data[wf_size];
+  memset(data,0,wf_size*sizeof(int));
+
+  new(p) Pds::Epics::EpicsPvCtrlLong(id,DBR_CTRL_LONG,wf_size,name.c_str(),ctrl,data);
+  
   Xtc xtc(TypeId(TypeId::Id_Epics,1),src);
-  xtc.extent += (sizeof(payload)+3)&(~3);
-  dg->insert(xtc, &payload);
+  xtc.extent += sz;
+  dg->insert(xtc, p);
+  delete[] p;
 }
 
 static void _insert_projection(InDatagram* dg,
@@ -74,33 +95,24 @@ static void _insert_projection(InDatagram* dg,
 			       int         id,
 			       const uint32_t* val)
 {
-#define PvType Pds::EpicsPvTime<DBR_LONG>
-#define BaseType EpicsDbrTools::DbrTypeTraits<DBR_LONG>::TDbrTime
+#define PvType Pds::Epics::EpicsPvTimeLong
 
   const int wf_size=1024;
 
   Xtc& xtc = dg->xtc;
   unsigned extent = xtc.extent;
 
-
   Xtc* tc = new (&xtc) Xtc(TypeId(TypeId::Id_Epics,1),src);
-  unsigned payload_size = sizeof(PvType)+sizeof(uint32_t)*(wf_size-1);
+  unsigned payload_size = sizeof(PvType)+sizeof(unsigned)*wf_size;
   payload_size = (payload_size+3)&~3;
   char* b = (char*)xtc.alloc(payload_size);
 
-  PvType* p;
-  { dbr_time_long v;
-    memset(&v,0,sizeof(v));
-    v.value = val[0];
-    p = new (b) PvType( id, 1, &v);
-    b += sizeof(PvType); }
-
-  memcpy( p+1, &val[1], sizeof(uint32_t)*(wf_size-1) );
+  Pds::Epics::dbr_time_long v;
+  memset(&v, 0, sizeof(v));
+  new (b) PvType(id, DBR_TIME_LONG, wf_size, v, reinterpret_cast<const int32_t*>(val));
 
   tc->extent = xtc.extent - extent;
 
-#undef ValueType
-#undef BaseType
 #undef PvType
 }
 
@@ -198,10 +210,10 @@ InDatagram* Pds_TimeTool_event::TimeToolA::events(InDatagram* dg)
 
 	unsigned laser_code = abs(_fex._event_code_no_laser);
 	for(unsigned i=0; i<_evrdata->numFifoEvents(); i++) {
-	  const EvrDataType::FIFOEvent& fe = _evrdata->fifoEvent(i);
-	  if (fe.EventCode == _fex._event_code_bykik)
+	  const Pds::EvrData::FIFOEvent& fe = _evrdata->fifoEvents()[i];
+	  if (fe.eventCode() == _fex._event_code_bykik)
 	    bykik = true;
-	  if (fe.EventCode == laser_code)
+	  if (fe.eventCode() == laser_code)
 	    no_laser = true;
 	}
 	
@@ -209,7 +221,7 @@ InDatagram* Pds_TimeTool_event::TimeToolA::events(InDatagram* dg)
 	  no_laser = !no_laser;
 	
 	if (_ipmdata) {
-	  if (_ipmdata->sum < _fex._ipm_no_beam_threshold)
+	  if (_ipmdata->sum() < _fex._ipm_no_beam_threshold)
 	    bykik = true;
 	}
 	

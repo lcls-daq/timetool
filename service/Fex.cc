@@ -1,7 +1,7 @@
 #include "Fex.hh"
 
-#include "pdsdata/camera/FrameV1.hh"
-#include "pdsdata/opal1k/ConfigV1.hh"
+#include "pdsdata/psddl/camera.ddl.h"
+#include "pdsdata/psddl/opal1k.ddl.h"
 #include "pdsdata/xtc/DetInfo.hh"
 #include "pdsdata/xtc/BldInfo.hh"
 
@@ -23,7 +23,7 @@ static void project_spectrumX(const Pds::Camera::FrameV1& frame,
                               uint32_t* sig)
 {
   const int width = frame.width();
-  const uint16_t* p = reinterpret_cast<const uint16_t*>(frame.data());
+  const uint16_t* p = reinterpret_cast<const uint16_t*>(frame.data16().data());
   p += top_row*width;
   p += lft_col;
   unsigned i=0;
@@ -35,7 +35,7 @@ static void project_spectrumX(const Pds::Camera::FrameV1& frame,
     sig[i++] = 0;
 
   for(unsigned j=top_row+1; j<=bot_row; j++) {
-    p = reinterpret_cast<const uint16_t*>(frame.data());
+    p = reinterpret_cast<const uint16_t*>(frame.data16().data());
     p += j*width;
     p += lft_col;
     for(unsigned int i=lft_col; i<=rgt_col; i++)
@@ -53,7 +53,7 @@ static void project_spectrumY(const Pds::Camera::FrameV1& frame,
   const int width = frame.width();
   for(unsigned int i=top_row; i<=bot_row; i++) {
     sig[i] = 0;
-    const uint16_t* p = reinterpret_cast<const uint16_t*>(frame.data());
+    const uint16_t* p = reinterpret_cast<const uint16_t*>(frame.data16().data());
     p += i*width;
     p += lft_col;
     for(unsigned int j=lft_col; j<=rgt_col; j++)

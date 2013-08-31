@@ -3,7 +3,7 @@
 #include "pdsdata/xtc/TypeId.hh"
 #include "pdsdata/xtc/Xtc.hh"
 #include "pdsdata/xtc/Dgram.hh"
-#include "pdsdata/camera/FrameV1.hh"
+#include "pdsdata/psddl/camera.ddl.h"
 #include "pdsdata/xtc/XtcIterator.hh"
 
 namespace Pds {
@@ -17,7 +17,7 @@ namespace Pds {
 	iterate(xtc);
       else if (xtc->contains.id()==TypeId::Id_Frame) {
 	Camera::FrameV1& f = *reinterpret_cast<Camera::FrameV1*>(xtc->payload());
-	uint16_t* d = const_cast<uint16_t*>(reinterpret_cast<const uint16_t*>(f.data()));
+	uint16_t* d = const_cast<uint16_t*>(reinterpret_cast<const uint16_t*>(f.data16().data()));
 	{ uint16_t* p = d + 515*f.width();
 	  for(unsigned i=0; i<f.width(); i++)
 	    *p++ = 256;

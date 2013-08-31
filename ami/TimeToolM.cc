@@ -9,19 +9,16 @@
 #include "pdsdata/xtc/DetInfo.hh"
 #include "pdsdata/xtc/TypeId.hh"
 #include "pdsdata/xtc/Xtc.hh"
-#include "pdsdata/epics/EpicsPvData.hh"
+#include "pdsdata/psddl/epics.ddl.h"
 
-#include "pdsdata/camera/FrameV1.hh"
-#include "pdsdata/opal1k/ConfigV1.hh"
-#include "pdsdata/evr/DataV3.hh"
-#include "pdsdata/lusi/IpmFexV1.hh"
+#include "pdsdata/psddl/camera.ddl.h"
+#include "pdsdata/psddl/opal1k.ddl.h"
+#include "pdsdata/psddl/evr.ddl.h"
+#include "pdsdata/psddl/lusi.ddl.h"
 
 using namespace Ami;
 
-#include "pdsdata/encoder/ConfigV2.hh"
-#include "pdsdata/encoder/DataV2.hh"
-#include "pdsdata/epics/EpicsDbrTools.hh"
-#include "pdsdata/epics/EpicsPvData.hh"
+#include "pdsdata/psddl/encoder.ddl.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -149,14 +146,15 @@ void TimeToolM::configure(const Pds::Src&       src,
   else if (src.phy() == _fex->_phy) {
     if (type.id()==Pds::TypeId::Id_Epics) {
       const int slen = _fex->base_name().length();
-      const Pds::EpicsPvCtrlHeader& pv = *reinterpret_cast<const Pds::EpicsPvCtrlHeader*>(payload);
-      if (strncmp(pv.sPvName,_fex->base_name().c_str(),slen)==0) {
-	if      (strcmp(&pv.sPvName[slen],":SIGNAL_WF")==0)
-	  _id_sig = pv.iPvId;
-	else if (strcmp(&pv.sPvName[slen],":SIDEBAND_WF")==0)
-	  _id_sb  = pv.iPvId;
-	else if (strcmp(&pv.sPvName[slen],":REFERENCE_WF")==0)
-	  _id_ref = pv.iPvId;
+      const Pds::Epics::EpicsPvCtrlHeader& pv = 
+        *reinterpret_cast<Pds::Epics::EpicsPvCtrlHeader*>(payload);
+      if (strncmp(pv.pvName(),_fex->base_name().c_str(),slen)==0) {
+	if      (strcmp(&pv.pvName()[slen],":SIGNAL_WF")==0)
+	  _id_sig = pv.pvId();
+	else if (strcmp(&pv.pvName()[slen],":SIDEBAND_WF")==0)
+	  _id_sb  = pv.pvId();
+	else if (strcmp(&pv.pvName()[slen],":REFERENCE_WF")==0)
+	  _id_ref = pv.pvId();
       }
     }
   }
@@ -173,13 +171,13 @@ void TimeToolM::event    (const Pds::Src&       src,
     if (type.id()==Pds::TypeId::Id_Frame)
       _frame = reinterpret_cast<Pds::Camera::FrameV1*>(payload);
     else if (type.id()==Pds::TypeId::Id_Epics) {
-      const Pds::EpicsPvTime<DBR_LONG>& pv = *reinterpret_cast<const Pds::EpicsPvTime<DBR_LONG>*>(payload);
-      if      (pv.iPvId == _id_sig) 
-	_sig_wf = reinterpret_cast<const uint32_t*>(&pv.value);
-      else if (pv.iPvId == _id_sb)
-	_sb_wf  = reinterpret_cast<const uint32_t*>(&pv.value);
-      else if (pv.iPvId == _id_ref)
-	_ref_wf = reinterpret_cast<const uint32_t*>(&pv.value);
+      const Pds::Epics::EpicsPvTimeLong& pv = *reinterpret_cast<const Pds::Epics::EpicsPvTimeLong*>(payload);
+      if      (pv.pvId() == _id_sig) 
+	_sig_wf = reinterpret_cast<const uint32_t*>(&pv+1);
+      else if (pv.pvId() == _id_sb)
+	_sb_wf  = reinterpret_cast<const uint32_t*>(&pv+1);
+      else if (pv.pvId() == _id_ref)
+	_ref_wf = reinterpret_cast<const uint32_t*>(&pv+1);
     }
   }
   else if (type.id()==Pds::TypeId::Id_EvrData) {
@@ -287,11 +285,11 @@ void TimeToolM::analyze  ()
       bool no_laser = false;
       unsigned laser_code = abs(_fex->_event_code_no_laser);
       for(unsigned i=0; i<_evrdata->numFifoEvents(); i++) {
-        const EvrDataType::FIFOEvent& fe = _evrdata->fifoEvent(i);
-        if (fe.EventCode == _fex->_event_code_bykik ||
-            fe.EventCode == _fex->_event_code_alkik)
+        const Pds::EvrData::FIFOEvent& fe = _evrdata->fifoEvents()[i];
+        if (fe.eventCode() == _fex->_event_code_bykik ||
+            fe.eventCode() == _fex->_event_code_alkik)
           bykik = true;
-        if (fe.EventCode == laser_code)
+        if (fe.eventCode() == laser_code)
           no_laser = true;
       }
 
@@ -299,7 +297,7 @@ void TimeToolM::analyze  ()
         no_laser = !no_laser;
 
       if (_ipmdata) {
-	if (_ipmdata->sum < _fex->_ipm_no_beam_threshold)
+	if (_ipmdata->sum() < _fex->_ipm_no_beam_threshold)
 	  bykik = true;
       }
 
