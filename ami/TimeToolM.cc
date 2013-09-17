@@ -136,7 +136,7 @@ void TimeToolM::clock    (const Pds::ClockTime& clk)
 //
 //  Cache the configuration for camera
 //
-void TimeToolM::configure(const Pds::Src&       src,
+void TimeToolM::configure(const Pds::DetInfo&   src,
 			  const Pds::TypeId&    type,
 			  void*                 payload) 
 {
@@ -163,7 +163,7 @@ void TimeToolM::configure(const Pds::Src&       src,
 //
 //  Capture pointer to detector data we want
 //
-void TimeToolM::event    (const Pds::Src&       src,
+void TimeToolM::event    (const Pds::DetInfo&   src,
 			  const Pds::TypeId&    type,
 			  void*                 payload) 
 {

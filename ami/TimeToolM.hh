@@ -28,10 +28,10 @@ namespace Ami {
   public:  // Handler functions
     void reset    (Ami::FeatureCache&);
     void clock    (const Pds::ClockTime& clk);     // timestamp of current event/configure
-    void configure(const Pds::Src&       src,      // configuration data callback
+    void configure(const Pds::DetInfo&   src,      // configuration data callback
 		   const Pds::TypeId&    type,
 		   void*                 payload);
-    void event    (const Pds::Src&       src,      // event data callback
+    void event    (const Pds::DetInfo&   src,      // event data callback
 		   const Pds::TypeId&    type,
 		   void*                 payload);
   public:  // Analysis functions
@@ -72,6 +72,22 @@ namespace Ami {
     Pds::ClockTime       _clk;
     Ami::FeatureCache*   _cache;
     int                  _cache_index;
+
+  public:
+    /// Empty instanciations
+    void configure(const Pds::BldInfo&   src,      // configuration data callback
+		   const Pds::TypeId&    type,
+		   void*                 payload) {}
+    void configure(const Pds::ProcInfo&  src,      // configuration data callback
+		   const Pds::TypeId&    type,
+		   void*                 payload) {}
+    void event    (const Pds::BldInfo&   src,      // event data callback
+		   const Pds::TypeId&    type,
+		   void*                 payload) {}
+    void event    (const Pds::ProcInfo&  src,      // event data callback
+		   const Pds::TypeId&    type,
+		   void*                 payload) {}
+
   };
 
 };
