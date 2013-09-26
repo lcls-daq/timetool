@@ -1,3 +1,3 @@
 libnames := service
 
-libsrcs_service := $(wildcard *.cc)
+libsrcs_service := $(filter-out ParabFit.cc, $(wildcard *.cc))

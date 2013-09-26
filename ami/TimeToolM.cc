@@ -43,22 +43,22 @@ namespace Ami {
   public:
     void _monitor_raw_sig(const uint32_t* wf, double* sb) 
     {
-      for(int k=0; k<cols; k++)
+      for(int k=_spec_begin; k<_spec_end; k++)
         _raw_hist->content(double(wf[k])-sb[k],k);
     }
     void _monitor_ref_sig(const double* wf) 
     {
-      for(int k=0; k<cols; k++)
+      for(int k=_spec_begin; k<_spec_end; k++)
         _ref_hist->content(wf[k],k);
     }
     void _monitor_sub_sig (const double* wf)
     {
-      for(int k=0; k<cols; k++)
+      for(int k=_spec_begin; k<_spec_end; k++)
         _sub_hist->content(wf[k],k);
     }
     void _monitor_sub_sig_u (const double* wf)
     {
-      for(int k=0; k<cols; k++)
+      for(int k=_spec_begin; k<_spec_end; k++)
         _sub_hist_u->content(wf[k],k);
     }
     void _monitor_flt_sig (const double* wf)
