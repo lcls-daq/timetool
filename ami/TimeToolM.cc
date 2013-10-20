@@ -32,6 +32,8 @@ typedef Pds::EvrData::DataV3 EvrDataType;
 #include "timetool/service/Fex.hh"
 #include "timetool/service/RatioFit.hh"
 
+#define DBUG
+
 static const int   cols  = Pds::Opal1k::ConfigV1::Column_Pixels;
 
 namespace Ami {
@@ -310,6 +312,15 @@ void TimeToolM::analyze  ()
         _fex->analyze(*_frame, bykik, no_laser);
 
       if (lpass) {
+
+#ifdef DBUG
+        printf("fex status %c  ampl %f  pos %f  ref_a %f  next_a %f\n",
+               _fex->status() ? 't':'f',
+               _fex->amplitude(),
+               _fex->filtered_position(),
+               _fex->ref_amplitude(),
+               _fex->next_amplitude());
+#endif
 
         if (_cache) {
           _cache->cache(_cache_index+0, _fex->amplitude());

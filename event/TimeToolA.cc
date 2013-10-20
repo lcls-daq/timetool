@@ -28,6 +28,8 @@ typedef Pds::EvrData::DataV3 EvrDataType;
 
 using namespace Pds;
 
+//#define DBUG
+
 static void _insert_pv(InDatagram* dg,
                        const Src&  src,
                        int         id,
@@ -39,8 +41,12 @@ static void _insert_pv(InDatagram* dg,
   double data(0);
   char* p = new char[sz];
 
+  char cname[Pds::Epics::iMaxPvNameLength];
+  memset(cname,0,Pds::Epics::iMaxPvNameLength);
+  sprintf(cname,"%s",name.c_str());
+
   Pds::Epics::dbr_ctrl_double ctrl; memset(&ctrl, 0, sizeof(ctrl));
-  new(p) Pds::Epics::EpicsPvCtrlDouble(id,DBR_CTRL_DOUBLE,1,name.c_str(),ctrl,&data);
+  new(p) Pds::Epics::EpicsPvCtrlDouble(id,DBR_CTRL_DOUBLE,1,cname,ctrl,&data);
   
   Xtc xtc(TypeId(TypeId::Id_Epics,1),src);
   xtc.extent += sz;
@@ -217,6 +223,11 @@ InDatagram* Pds_TimeTool_event::TimeToolA::events(InDatagram* dg)
 	    no_laser = true;
 	}
 	
+#ifdef DBUG
+        printf("after evr: bykik %c  no_laser %c\n",
+               bykik ? 't':'f', no_laser ? 't':'f');
+#endif
+
 	if (int(_fex._event_code_no_laser) < 0)
 	  no_laser = !no_laser;
 	
@@ -224,8 +235,13 @@ InDatagram* Pds_TimeTool_event::TimeToolA::events(InDatagram* dg)
 	  if (_ipmdata->sum() < _fex._ipm_no_beam_threshold)
 	    bykik = true;
 	}
-	
-	_fex.analyze(*_frame,_bykik,_no_laser);
+
+#ifdef DBUG
+        printf("after ipm: bykik %c  no_laser %c\n",
+               bykik ? 't':'f', no_laser ? 't':'f');
+#endif
+
+	_fex.analyze(*_frame,bykik,no_laser);
 	
 	if (!_fex.write_image()) {
 	  uint32_t* pdg = reinterpret_cast<uint32_t*>(&dg->xtc);

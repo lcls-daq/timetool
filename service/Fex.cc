@@ -13,6 +13,8 @@
 
 using namespace TimeTool;
 
+//#define DBUG
+
 static const int   cols  = Pds::Opal1k::ConfigV1::Column_Pixels;
 
 static void project_spectrumX(const Pds::Camera::FrameV1& frame,
@@ -112,6 +114,7 @@ void Fex::configure()
   _write_image       = true;
   _write_projections = false;
   _ipm_no_beam_src   = Pds::DetInfo("None");
+  _ipm_no_beam_threshold = -999;
 
   char buff[128];
   const char* dir = getenv("HOME");
@@ -275,6 +278,11 @@ void Fex::analyze(const uint32_t* u_sig,
 		  const uint32_t* u_ref,
                   bool bykik, bool no_laser)
 {
+#ifdef DBUG
+  printf("Fex::analyze bykik %c  no_laser %c\n",
+         bykik ? 't':'f', no_laser ? 't':'f');
+#endif
+
   reset();
 
   if (no_laser) return;
@@ -379,6 +387,11 @@ void Fex::analyze(const uint32_t* u_sig,
         amax = aleft = (qwf[i] > 0 ? qwf[i] : 0);
       }
     }
+
+#ifdef DBUG
+    printf("peaks %d  amax %f  imax %d  aleft %f  aright %f\n",
+           peaks.size(), amax, imax, aleft, aright);
+#endif
 
     //      for(std::list<int>::const_iterator it=peaks.begin(); it!=peaks.end(); it++, _nfits++)
     //        _fits[_nfits].process(qwf,qwfe,*it,_nwts);

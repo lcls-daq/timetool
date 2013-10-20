@@ -29,7 +29,7 @@ void Fit::process(double* qwf, double* qwfe, unsigned word, unsigned nwts, unsig
 
   if (a[2] < 0) {  // a maximum
     _p[Amplitude] = a[0] - 0.25*a[1]*a[1]/a[2];
-    _p[Position ] = -0.5*a[1]/a[2];
+    _p[Position ] = double(ix_left)-0.5*a[1]/a[2];
     _valid = true;
   }
 
