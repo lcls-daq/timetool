@@ -32,7 +32,7 @@ typedef Pds::EvrData::DataV3 EvrDataType;
 #include "timetool/service/Fex.hh"
 #include "timetool/service/RatioFit.hh"
 
-#define DBUG
+//#define DBUG
 
 static const int   cols  = Pds::Opal1k::ConfigV1::Column_Pixels;
 

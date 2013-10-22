@@ -1,7 +1,6 @@
-libnames := app
+libnames := ttapp
 
-libsrcs_app := TimeToolA.cc
-libsrcs_app += $(wildcard ../service/*.cc)
-liblibs_app := pdsalg/pdsalg
-libincs_app := epics/include epics/include/os/Linux 
-libincs_app += pdsdata/include ndarray/include pdsalg/include
+libsrcs_ttapp := TimeToolA.cc
+liblibs_ttapp := timetool/ttsvc pdsalg/pdsalg
+libincs_ttapp := epics/include epics/include/os/Linux 
+libincs_ttapp += pdsdata/include ndarray/include pdsalg/include

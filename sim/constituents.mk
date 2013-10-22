@@ -1,4 +1,4 @@
-libnames := sim
+libnames := ttsim
 
-libsrcs_sim := $(wildcard *.cc)
-libincs_sim := pdsdata/include ndarray/include 
+libsrcs_ttsim := $(wildcard *.cc)
+libincs_ttsim := pdsdata/include ndarray/include 

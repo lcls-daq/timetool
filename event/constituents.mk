@@ -1,6 +1,6 @@
-libnames := event
+libnames := ttevent
 
-libsrcs_event := $(wildcard *.cc)
-libsrcs_event += $(wildcard ../service/*.cc)
-libincs_event := epics/include epics/include/os/Linux
-libincs_event += pdsdata/include ndarray/include 
+libsrcs_ttevent := $(wildcard *.cc)
+liblibs_ttevent += timetool/ttsvc
+libincs_ttevent := epics/include epics/include/os/Linux
+libincs_ttevent += pdsdata/include ndarray/include 
