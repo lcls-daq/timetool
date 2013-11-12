@@ -64,7 +64,7 @@ static void project_spectrumY(const Pds::Camera::FrameV1& frame,
 }
 
 Fex::Fex(const char* fname) :
-  _fname   (fname), 
+  _fname   (fname+strspn(fname," \t")), 
   _event_code_bykik(162), 
   _event_code_alkik(163), 
   _event_code_no_laser(0),
@@ -81,7 +81,8 @@ Fex::Fex(const char* fname) :
   _sb      (cols),
   _sp      (cols),
   _ref     (cols)
-{}
+{
+}
 
 Fex::~Fex() 
 {
@@ -117,8 +118,12 @@ void Fex::configure()
   _ipm_no_beam_threshold = -999;
 
   char buff[128];
-  const char* dir = getenv("HOME");
-  sprintf(buff,"%s/%s", dir ? dir : "/tmp", _fname.c_str());
+  if (_fname[0]=='/')
+    strcpy(buff,_fname.c_str());
+  else {
+    const char* dir = getenv("HOME");
+    sprintf(buff,"%s/%s", dir ? dir : "/tmp", _fname.c_str());
+  }
   FILE* f = fopen(buff,"r");
   if (f) {
 
@@ -227,7 +232,7 @@ void Fex::configure()
     printf("TT use_ref %u\n",_use_ref);
   }
   else
-    printf("Failed to open %s\n",buff);
+    printf("Failed to open %s [%s]\n",buff,_fname.c_str());
 }
 
 void Fex::reset() 

@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string>
 #include <new>
+#include <fstream>
 
 using std::string;
 
@@ -182,23 +183,56 @@ namespace Pds {
   
   class FexApp : public XtcIterator {
   public:
-    FexApp(const char* fname) : _fex(fname), _pv_writer(0) {}
-    ~FexApp() {}
+    FexApp(const char* fname) : _pv_writer(0) {
+      char buff[128];
+      const char* dir = getenv("HOME");
+      sprintf(buff,"%s/%s", dir ? dir : "/tmp", fname);
+      std::ifstream f(buff);
+      if (f) {
+        while(!f.eof()) {
+          string sline;
+          std::getline(f,sline);
+          if (sline[0]=='<')
+            _fex.push_back(new TimeTool::Fex(sline.substr(1).c_str()));
+        }
+        if (_fex.size()==0)
+          _fex.push_back(new TimeTool::Fex(fname));
+        _frame    .resize(_fex.size());
+        _pv_writer.resize(_fex.size());
+      }
+    }
+    ~FexApp() {
+      for(unsigned i=0; i<_fex.size(); i++) {
+        delete _fex[i];
+        if (_pv_writer[i])
+          delete _pv_writer[i];
+      }
+    }
   public:
     Transition* transitions(Transition* tr) {
       if (tr->id()==TransitionId::Configure) {
-        _fex.configure();
+        for(unsigned i=0; i<_fex.size(); i++) {
+          // cleanup
+          if (_pv_writer[i]) {
+            delete _pv_writer[i];
+            _pv_writer[i] = 0;
+          }
+          // configure
+          TimeTool::Fex& fex = *_fex[i];
+          fex.configure();
+          if (fex._adjust_stats)
+            _pv_writer[i] = new PVWriter(fex._adjust_pv.c_str());
+        }
         _adjust_n = 0;
         _adjust_v = 0;
-        if (_fex._adjust_stats) {
-          _pv_writer = new PVWriter(_fex._adjust_pv.c_str());
-        }
       }
       else if (tr->id()==TransitionId::Unconfigure) {
-        _fex.unconfigure();
-        if (_pv_writer) {
-          delete _pv_writer;
-          _pv_writer = 0;
+        for(unsigned i=0; i<_fex.size(); i++) {
+          _fex[i]->unconfigure();
+          if (_pv_writer[i]) {
+            delete _pv_writer[i];
+            _pv_writer[i] = 0;
+          }
         }
       }
       return tr;
@@ -207,73 +241,65 @@ namespace Pds {
       switch(dg->datagram().seq.service()) {
       case TransitionId::L1Accept:
         { //  Add an encoder data object
-          _fex.reset();
+          for(unsigned i=0; i<_fex.size(); i++)
+            _frame[i] = 0;
 
           const Src& src = reinterpret_cast<Xtc*>(dg->xtc.payload())->src;
 
-          _frame = 0;
           iterate(&dg->xtc);
 
-          if (_frame) {
-            _fex.analyze(*_frame,_bykik,_no_laser);
+          for(unsigned i=0; i<_fex.size(); i++) {
+            if (_frame[i]) {
+              TimeTool::Fex& fex = *_fex[i];
+              fex.reset();
+
+              fex.analyze(*_frame[i],_bykik,_no_laser);
 	    
-	    if (!_fex.write_image()) {
-	      uint32_t* pdg = reinterpret_cast<uint32_t*>(&dg->xtc);
-	      FrameTrim iter(pdg);
-	      iter.process(&dg->xtc);
-	    }
+              // assumes only one fex per event
+              if (!fex.write_image()) {
+                uint32_t* pdg = reinterpret_cast<uint32_t*>(&dg->xtc);
+                FrameTrim iter(pdg);
+                iter.process(&dg->xtc);
+              }
 
-	    if (_fex.write_projections()) {
-	      _insert_projection(dg, src, 6, _fex.signal_wf   ());
-	      _insert_projection(dg, src, 7, _fex.sideband_wf ());
-	      _insert_projection(dg, src, 8, _fex.reference_wf());
-	    }
-	  }
+              if (fex.write_projections()) {
+                _insert_projection(dg, src, 6, fex.signal_wf   ());
+                _insert_projection(dg, src, 7, fex.sideband_wf ());
+                _insert_projection(dg, src, 8, fex.reference_wf());
+              }
 
-          Damage dmg(_fex.status() ? 0x4000 : 0);
+              Damage dmg(fex.status() ? 0x4000 : 0);
 
-	  //  Remove the frame
-	  //	  dg->datagram().xtc.extent = sizeof(Xtc);
+              //  Remove the frame
+              //	  dg->datagram().xtc.extent = sizeof(Xtc);
 
-	  //  Insert the results
-          _insert_pv(dg, src, 0, _fex.amplitude());
-          _insert_pv(dg, src, 1, _fex.filtered_position ());
-          _insert_pv(dg, src, 2, _fex.filtered_pos_ps ());
-          _insert_pv(dg, src, 3, _fex.filtered_fwhm ());
-          _insert_pv(dg, src, 4, _fex.next_amplitude());
-          _insert_pv(dg, src, 5, _fex.ref_amplitude());
+              //  Insert the results
+              _insert_pv(dg, src, 0, fex.amplitude());
+              _insert_pv(dg, src, 1, fex.filtered_position ());
+              _insert_pv(dg, src, 2, fex.filtered_pos_ps ());
+              _insert_pv(dg, src, 3, fex.filtered_fwhm ());
+              _insert_pv(dg, src, 4, fex.next_amplitude());
+              _insert_pv(dg, src, 5, fex.ref_amplitude());
 
-          if (_fex.status()) {
-            _adjust_v += _fex.filtered_pos_adj();
-            _adjust_n++;
-            if (_adjust_n==_fex._adjust_stats) {
-              *reinterpret_cast<double*>(_pv_writer->data()) = 1.e3*_adjust_v/double(_adjust_n);
-              _pv_writer->put();
-              _adjust_v = 0;
-              _adjust_n = 0;
+              if (fex.status()) {
+                _adjust_v += fex.filtered_pos_adj();
+                _adjust_n++;
+                if (_adjust_n==fex._adjust_stats) {
+                  *reinterpret_cast<double*>(_pv_writer[i]->data()) = 1.e3*_adjust_v/double(_adjust_n);
+                  _pv_writer[i]->put();
+                  _adjust_v = 0;
+                  _adjust_n = 0;
+                }
+              }
+              break; 
             }
           }
 
           break; }
       case TransitionId::Configure:
-        { //  Add an encoder config object
-          const ProcInfo& info = reinterpret_cast<const ProcInfo&>(dg->xtc.src);
-          DetInfo src  (info.processId(),
-                       (DetInfo::Detector)((_fex._phy>>24)&0xff), ((_fex._phy>>16)&0xff),
-                       (DetInfo::Device  )((_fex._phy>> 8)&0xff), ((_fex._phy>> 0)&0xff));
-          _insert_pv(dg, src, 0, _fex.base_name()+":AMPL");
-          _insert_pv(dg, src, 1, _fex.base_name()+":FLTPOS");
-          _insert_pv(dg, src, 2, _fex.base_name()+":FLTPOS_PS");
-          _insert_pv(dg, src, 3, _fex.base_name()+":FLTPOSFWHM");
-          _insert_pv(dg, src, 4, _fex.base_name()+":AMPLNXT");
-          _insert_pv(dg, src, 5, _fex.base_name()+":REFAMPL");
-
-	  if (_fex.write_projections()) {
-	    _insert_projection(dg, src, 6, _fex.base_name()+":SIGNAL_WF");
-	    _insert_projection(dg, src, 7, _fex.base_name()+":SIDEBAND_WF");
-	    _insert_projection(dg, src, 8, _fex.base_name()+":REFERENCE_WF");
-	  }
-          break; }
+        _dg = dg;
+        iterate(&dg->xtc);
+        break;
       default:
         break;
       }
@@ -284,22 +310,50 @@ namespace Pds {
       if (xtc->contains.id()==TypeId::Id_Xtc) 
         iterate(xtc);
       else if (xtc->contains.id()==TypeId::Id_Frame) {
-        _frame = reinterpret_cast<const Camera::FrameV1*>(xtc->payload());
+        const Camera::FrameV1* frame = reinterpret_cast<const Camera::FrameV1*>(xtc->payload());
+        for(unsigned i=0; i<_fex.size(); i++)
+          if (_fex[i]->_phy == xtc->src.phy())
+            _frame[i] = frame;
+      }
+      else if (xtc->contains.id()==TypeId::Id_Opal1kConfig) {
+        for(unsigned i=0; i<_fex.size(); i++) {
+          TimeTool::Fex& fex = *_fex[i];
+          if (fex._phy == xtc->src.phy()) {
+            InDatagram* dg = _dg;
+            const ProcInfo& info = static_cast<const ProcInfo&>(dg->xtc.src);
+            DetInfo src  (info.processId(),
+                          (DetInfo::Detector)((fex._phy>>24)&0xff), ((fex._phy>>16)&0xff),
+                          (DetInfo::Device  )((fex._phy>> 8)&0xff), ((fex._phy>> 0)&0xff));
+            _insert_pv(dg, src, 0, fex.base_name()+":AMPL");
+            _insert_pv(dg, src, 1, fex.base_name()+":FLTPOS");
+            _insert_pv(dg, src, 2, fex.base_name()+":FLTPOS_PS");
+            _insert_pv(dg, src, 3, fex.base_name()+":FLTPOSFWHM");
+            _insert_pv(dg, src, 4, fex.base_name()+":AMPLNXT");
+            _insert_pv(dg, src, 5, fex.base_name()+":REFAMPL");
+
+            if (fex.write_projections()) {
+              _insert_projection(dg, src, 6, fex.base_name()+":SIGNAL_WF");
+              _insert_projection(dg, src, 7, fex.base_name()+":SIDEBAND_WF");
+              _insert_projection(dg, src, 8, fex.base_name()+":REFERENCE_WF");
+            }
+          }
+        }
       }
       return 1;
     }
-    unsigned event_code_bykik   () const { return _fex._event_code_bykik; }
-    unsigned event_code_alkik   () const { return _fex._event_code_alkik; }
-    unsigned event_code_no_laser() const { return _fex._event_code_no_laser; }
+    unsigned event_code_bykik   () const { return _fex[0]->_event_code_bykik; }
+    unsigned event_code_alkik   () const { return _fex[0]->_event_code_alkik; }
+    unsigned event_code_no_laser() const { return _fex[0]->_event_code_no_laser; }
     void setup(bool bykik, bool no_laser) { _bykik=bykik; _no_laser=no_laser; }
   private:
-    TimeTool::Fex _fex;
-    const Camera::FrameV1* _frame;
+    std::vector<TimeTool::Fex*        > _fex;
+    std::vector<const Camera::FrameV1*> _frame;
+    std::vector<PVWriter*             > _pv_writer;
     bool      _bykik;
     bool      _no_laser;
-    PVWriter* _pv_writer;
     unsigned  _adjust_n;
     double    _adjust_v;
+    InDatagram* _dg;
   };
 
 
