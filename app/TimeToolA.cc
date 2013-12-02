@@ -12,6 +12,7 @@
 #include "pdsdata/xtc/Dgram.hh"
 #include "pdsdata/xtc/XtcIterator.hh"
 #include "pdsdata/xtc/TransitionId.hh"
+#include "pdsdata/compress/CompressedXtc.hh"
 #include "pdsdata/psddl/camera.ddl.h"
 #include "pdsdata/psddl/opal1k.ddl.h"
 #include "pdsdata/psddl/evr.ddl.h"
@@ -199,6 +200,7 @@ namespace Pds {
           _fex.push_back(new TimeTool::Fex(fname));
         _frame    .resize(_fex.size());
         _pv_writer.resize(_fex.size());
+        _pXtc     .resize(_fex.size());
       }
     }
     ~FexApp() {
@@ -310,10 +312,15 @@ namespace Pds {
       if (xtc->contains.id()==TypeId::Id_Xtc) 
         iterate(xtc);
       else if (xtc->contains.id()==TypeId::Id_Frame) {
-        const Camera::FrameV1* frame = reinterpret_cast<const Camera::FrameV1*>(xtc->payload());
         for(unsigned i=0; i<_fex.size(); i++)
-          if (_fex[i]->_phy == xtc->src.phy())
-            _frame[i] = frame;
+          if (_fex[i]->_phy == xtc->src.phy()) {
+            if (xtc->contains.compressed()) {
+              _pXtc [i] = Pds::CompressedXtc::uncompress(*xtc);
+              _frame[i] = reinterpret_cast<Pds::Camera::FrameV1*>(_pXtc[i]->payload());
+            }
+            else
+              _frame[i] = reinterpret_cast<const Camera::FrameV1*>(xtc->payload());
+          }
       }
       else if (xtc->contains.id()==TypeId::Id_Opal1kConfig) {
         for(unsigned i=0; i<_fex.size(); i++) {
@@ -349,6 +356,7 @@ namespace Pds {
     std::vector<TimeTool::Fex*        > _fex;
     std::vector<const Camera::FrameV1*> _frame;
     std::vector<PVWriter*             > _pv_writer;
+    std::vector<boost::shared_ptr<Pds::Xtc> > _pXtc;
     bool      _bykik;
     bool      _no_laser;
     unsigned  _adjust_n;

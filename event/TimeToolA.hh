@@ -6,6 +6,8 @@
 
 #include "timetool/service/Fex.hh"
 
+#include <boost/shared_ptr.hpp>
+
 namespace Pds { 
   namespace Opal1k  { class ConfigV1; } 
   namespace EvrData { class DataV3; } 
@@ -31,6 +33,7 @@ namespace Pds_TimeTool_event {
     Pds::Lusi::IpmFexV1* _ipmdata;
     bool      _bykik;
     bool      _no_laser;
+    boost::shared_ptr<Pds::Xtc> _pXtc;
   };
 };
 

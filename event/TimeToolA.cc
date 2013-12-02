@@ -4,6 +4,7 @@
 #include "pdsdata/xtc/Xtc.hh"
 #include "pdsdata/xtc/Dgram.hh"
 #include "pdsdata/xtc/TransitionId.hh"
+#include "pdsdata/compress/CompressedXtc.hh"
 #include "pdsdata/psddl/opal1k.ddl.h"
 #include "pdsdata/psddl/evr.ddl.h"
 #include "pdsdata/xtc/DetInfo.hh"
@@ -298,7 +299,12 @@ int Pds_TimeTool_event::TimeToolA::process(Xtc* xtc)
     iterate(xtc);
   else if (xtc->contains.id()==TypeId::Id_Frame && 
 	   xtc->src.phy() == _fex._phy) {
-    _frame = reinterpret_cast<const Camera::FrameV1*>(xtc->payload());
+    if (xtc->contains.compressed()) {
+      _pXtc = Pds::CompressedXtc::uncompress(*xtc);
+      _frame = reinterpret_cast<Pds::Camera::FrameV1*>(_pXtc->payload());
+    }
+    else
+      _frame = reinterpret_cast<const Camera::FrameV1*>(xtc->payload());
   }
   else if (xtc->contains.id()==Pds::TypeId::Id_EvrData) {
     _evrdata = reinterpret_cast<Pds::EvrData::DataV3*>(xtc->payload());
