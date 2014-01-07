@@ -1,5 +1,5 @@
 #include "Fit.hh"
-#include "pdsalg/pdsalg.h"
+#include "psalg/psalg.h"
 #include "ndarray/ndarray.h"
 
 using namespace TimeTool;
@@ -25,7 +25,7 @@ void Fit::process(double* qwf, double* qwfe, unsigned word, unsigned nwts, unsig
   }
 
   ndarray<const double,1> input = make_ndarray(&qwf[ix_left],ix_right-ix_left+1);
-  ndarray<double,1> a = pdsalg::parab_fit(input);
+  ndarray<double,1> a = psalg::parab_fit(input);
 
   if (a[2] < 0) {  // a maximum
     _p[Amplitude] = a[0] - 0.25*a[1]*a[1]/a[2];
