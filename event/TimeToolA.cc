@@ -212,37 +212,7 @@ InDatagram* Pds_TimeTool_event::TimeToolA::events(InDatagram* dg)
 
       if (_frame && _evrdata) {
 
-	bool bykik    = false;
-	bool no_laser = false;
-
-	unsigned laser_code = abs(_fex._event_code_no_laser);
-	for(unsigned i=0; i<_evrdata->numFifoEvents(); i++) {
-	  const Pds::EvrData::FIFOEvent& fe = _evrdata->fifoEvents()[i];
-	  if (fe.eventCode() == _fex._event_code_bykik)
-	    bykik = true;
-	  if (fe.eventCode() == laser_code)
-	    no_laser = true;
-	}
-	
-#ifdef DBUG
-        printf("after evr: bykik %c  no_laser %c\n",
-               bykik ? 't':'f', no_laser ? 't':'f');
-#endif
-
-	if (int(_fex._event_code_no_laser) < 0)
-	  no_laser = !no_laser;
-	
-	if (_ipmdata) {
-	  if (_ipmdata->sum() < _fex._ipm_no_beam_threshold)
-	    bykik = true;
-	}
-
-#ifdef DBUG
-        printf("after ipm: bykik %c  no_laser %c\n",
-               bykik ? 't':'f', no_laser ? 't':'f');
-#endif
-
-	_fex.analyze(*_frame,bykik,no_laser);
+	_fex.analyze(_frame->data16(), _evrdata->fifoEvents(), _ipmdata);
 	
 	if (!_fex.write_image()) {
 	  uint32_t* pdg = reinterpret_cast<uint32_t*>(&dg->xtc);
@@ -250,11 +220,13 @@ InDatagram* Pds_TimeTool_event::TimeToolA::events(InDatagram* dg)
 	  iter.process(&dg->xtc);
 	}
 
+        /*
 	if (_fex.write_projections()) {
 	  _insert_projection(dg, src, 6, _fex.signal_wf   ());
 	  _insert_projection(dg, src, 7, _fex.sideband_wf ());
 	  _insert_projection(dg, src, 8, _fex.reference_wf());
 	}
+        */
       }
 
       Damage dmg(_fex.status() ? 0x4000 : 0);
@@ -298,7 +270,7 @@ int Pds_TimeTool_event::TimeToolA::process(Xtc* xtc)
   if (xtc->contains.id()==TypeId::Id_Xtc) 
     iterate(xtc);
   else if (xtc->contains.id()==TypeId::Id_Frame && 
-	   xtc->src.phy() == _fex._phy) {
+	   xtc->src.phy() == _fex.src().phy()) {
     if (xtc->contains.compressed()) {
       _pXtc = Pds::CompressedXtc::uncompress(*xtc);
       _frame = reinterpret_cast<Pds::Camera::FrameV1*>(_pXtc->payload());
@@ -309,8 +281,8 @@ int Pds_TimeTool_event::TimeToolA::process(Xtc* xtc)
   else if (xtc->contains.id()==Pds::TypeId::Id_EvrData) {
     _evrdata = reinterpret_cast<Pds::EvrData::DataV3*>(xtc->payload());
   }
-  else if (xtc->src.level()==_fex._ipm_no_beam_src.level() && 
-	   xtc->src.phy  ()==_fex._ipm_no_beam_src.phy  () &&
+  else if (xtc->src.level()==_fex.m_ipm_get_key.level() && 
+	   xtc->src.phy  ()==_fex.m_ipm_get_key.phy  () &&
 	   xtc->contains.id  ()==Pds::TypeId::Id_IpmFex) {
     _ipmdata = reinterpret_cast<Pds::Lusi::IpmFexV1*>(xtc->payload());
   }

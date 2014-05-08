@@ -3,6 +3,8 @@
 
 #include "pds/utility/Appliance.hh"
 #include "pds/service/Semaphore.hh"
+#include "pdsdata/psddl/evr.ddl.h"
+#include "ndarray/ndarray.h"
 
 namespace Pds {
   class FexApp;
@@ -19,8 +21,7 @@ namespace Pds {
     Task*     _task;
     FexApp*   _fex;
     Semaphore _sem;
-    uint32_t  _bykik;
-    uint32_t  _no_laser;
+    std::vector< std::vector<Pds::EvrData::FIFOEvent> > _evr;
   };
 };
 

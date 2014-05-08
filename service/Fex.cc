@@ -1,100 +1,36 @@
 #include "Fex.hh"
+#include "Config.hh"
 
 #include "pdsdata/psddl/camera.ddl.h"
 #include "pdsdata/psddl/opal1k.ddl.h"
 #include "pdsdata/xtc/DetInfo.hh"
 #include "pdsdata/xtc/BldInfo.hh"
+#include "psalg/psalg.h"
 
 #include <list>
+#include <sstream>
 
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
+using Pds::DetInfo;
 using namespace TimeTool;
 
 //#define DBUG
 
-static const int   cols  = Pds::Opal1k::ConfigV1::Column_Pixels;
-
-static void project_spectrumX(const Pds::Camera::FrameV1& frame,
-                              unsigned top_row,
-                              unsigned bot_row,
-                              unsigned lft_col,
-                              unsigned rgt_col,
-                              uint32_t* sig)
-{
-  const int width = frame.width();
-  const uint16_t* p = reinterpret_cast<const uint16_t*>(frame.data16().data());
-  p += top_row*width;
-  p += lft_col;
-  unsigned i=0;
-  while(i<lft_col)
-    sig[i++] = 0;
-  while(i<=rgt_col)
-    sig[i++] = (*p++);
-  while(i<(unsigned)width)
-    sig[i++] = 0;
-
-  for(unsigned j=top_row+1; j<=bot_row; j++) {
-    p = reinterpret_cast<const uint16_t*>(frame.data16().data());
-    p += j*width;
-    p += lft_col;
-    for(unsigned int i=lft_col; i<=rgt_col; i++)
-      sig[i] += (*p++);
-  }
-}
-
-static void project_spectrumY(const Pds::Camera::FrameV1& frame,
-                              unsigned lft_col,
-                              unsigned rgt_col,
-                              unsigned top_row,
-                              unsigned bot_row,
-                              uint32_t* sig)
-{
-  const int width = frame.width();
-  for(unsigned int i=top_row; i<=bot_row; i++) {
-    sig[i] = 0;
-    const uint16_t* p = reinterpret_cast<const uint16_t*>(frame.data16().data());
-    p += i*width;
-    p += lft_col;
-    for(unsigned int j=lft_col; j<=rgt_col; j++)
-      sig[i] += (*p++);
-  }
-}
-
 Fex::Fex(const char* fname) :
-  _fname   (fname+strspn(fname," \t")), 
-  _event_code_bykik(162), 
-  _event_code_alkik(163), 
-  _event_code_no_laser(0),
-  _calib_p0(0),
-  _calib_p1(0),
-  _calib_p2(0),
-  _use_ref (0), 
-  _ref_cut (0),
-  _sig_cut (0),
-  _wts     (0),
-  sb       (new uint32_t[cols]),
-  ref      (new uint32_t[cols]),
-  sig      (new uint32_t[cols]),
-  _sb      (cols),
-  _sp      (cols),
-  _ref     (cols)
+  _fname(fname+strspn(fname," \t")) 
 {
 }
 
 Fex::~Fex() 
 {
-  if (_wts) delete[] _wts; 
-  delete[] sb;
-  delete[] ref;
-  delete[] sig;
 }
 
 void Fex::init_plots()
 {
-  _monitor_ref_sig( _sp.ref() );
+  _monitor_ref_sig( m_ref );
 }
 
 void Fex::unconfigure()
@@ -102,21 +38,18 @@ void Fex::unconfigure()
   // Record accumulated reference
   char buff[128];
   const char* dir = getenv("HOME");
-  sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", _phy);
-  _sp.save_ref(buff);
+  sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
+  FILE* f = fopen(buff,"w");
+  if (f) {
+    for(unsigned i=0; i<m_ref.size(); i++)
+      fprintf(f," %f",m_ref[i]);
+    fprintf(f,"\n");
+    fclose(f);
+  }
 }
 
 void Fex::configure()
 {
-  //
-  // defaults for absent variables
-  //
-  _adjust_stats = 0;
-  _write_image       = true;
-  _write_projections = false;
-  _ipm_no_beam_src   = Pds::DetInfo("None");
-  _ipm_no_beam_threshold = -999;
-
   char buff[128];
   if (_fname[0]=='/')
     strcpy(buff,_fname.c_str());
@@ -124,309 +57,320 @@ void Fex::configure()
     const char* dir = getenv("HOME");
     sprintf(buff,"%s/%s", dir ? dir : "/tmp", _fname.c_str());
   }
-  FILE* f = fopen(buff,"r");
-  if (f) {
 
-    printf("TimeTool:Fex reading configuration from file %s\n",buff);
+  printf("TimeTool:Fex reading configuration from file %s\n",buff);
+  Config svc(buff);
 
-    size_t sz = 8 * 1024;
-    char* linep = (char *)malloc(sz);
-    char* pEnd;
-
-    while(getline(&linep, &sz, f)>0) {
-      if (linep[0]=='#')
-        continue;
-      const char* delim = " \t\n";
-      char* name = strtok(linep,delim);
-      if (!name) continue;
-      char* arg  = strtok(0,delim);
-      if (!arg) continue;
-      unsigned v_ul = strtoul(arg,&pEnd,0);
-      double   v_db = strtod (arg,&pEnd);
-      if      (strcasecmp(name,"base_name")==0)  _base_name= string(arg);
-      else if (strcasecmp(name,"phy")==0) {
-	if (v_ul) _phy = v_ul;
-	else {
-	  Pds::DetInfo det(arg);
-	  if (det.detector()<Pds::DetInfo::NumDetector)
-	    _phy = det.phy();
-	  else
-	    _phy = Pds::BldInfo(arg).phy();
-	}
-      }
-      else if (strcasecmp(name,"event_code_bykik")==0)    _event_code_bykik  = v_ul;
-      else if (strcasecmp(name,"event_code_no_laser")==0) _event_code_no_laser  = v_ul;
-      else if (strcasecmp(name,"ipm_no_beam")==0) {
-	Pds::DetInfo det(arg);
-	if (det.detector()<Pds::DetInfo::NumDetector)
-	  _ipm_no_beam_src = det;
-	else
-	  _ipm_no_beam_src = Pds::BldInfo(arg);
-      }
-      else if (strcasecmp(name,"ipm_no_beam_threshold")==0) _ipm_no_beam_threshold  = v_db;
-      else if (strcasecmp(name,"calib_p0")==0)    _calib_p0  = v_db;
-      else if (strcasecmp(name,"calib_p1")==0)    _calib_p1  = v_db;
-      else if (strcasecmp(name,"calib_p2")==0)    _calib_p2  = v_db;
-      else if (strcasecmp(name,"use_ref")==0)     _use_ref   = v_ul;
-      else if (strcasecmp(name,"ref_fit_p1")==0) _ref_fit_p1  = v_ul;
-      else if (strcasecmp(name,"ref_top")==0)    _ref_top  = v_ul;
-      else if (strcasecmp(name,"ref_bot")==0)    _ref_bot  = v_ul;
-      else if (strcasecmp(name,"ref_cut")==0)    _ref_cut  = v_db;
-      else if (strcasecmp(name,"sig_top")==0)    _sig_top  = v_ul;
-      else if (strcasecmp(name,"sig_bot")==0)    _sig_bot  = v_ul;
-      else if (strcasecmp(name,"sig_cut")==0)    _sig_cut  = v_db;
-      else if (strcasecmp(name,"sb_top")==0)     _sb_top   = v_ul;
-      else if (strcasecmp(name,"sb_bot")==0)     _sb_bot   = v_ul;
-      else if (strcasecmp(name,"spec_begin")==0) _spec_begin = v_ul;
-      else if (strcasecmp(name,"spec_end"  )==0) _spec_end   = v_ul;
-      else if (strcasecmp(name,"sb_convergence")==0)
-        _sb.set_convergence(v_db);
-      else if (strcasecmp(name,"sig_convergence")==0)
-        _sp.set_convergence(v_db);
-      else if (strcasecmp(name,"indicator_offset")==0)
-        _indicator_offset = v_db;
-      else if (strcasecmp(name,"ref_update_period")==0)
-        _ref_corr.set_period(v_ul);
-      else if (strcasecmp(name,"nwts")==0) {
-        _nwts     = v_ul;
-        if (_wts) delete[] _wts;
-        _wts      = new double[_nwts];
-        for(int i=0; i<int(_nwts); i++) {
-          getline(&linep, &sz, f);
-          _wts[i] = strtod(linep,&pEnd);
-        }
-      }
-      else if (strcasecmp(name,"project")==0) {
-        _projectX = arg[0]=='x' || arg[0]=='X';
-        printf("project %c [%c]\n", _projectX ? 'X' : 'Y',arg[0]);
-      }
-      else if (strcasecmp(name,"write_image")==0)
-	_write_image = arg[0]=='t' || arg[0]=='T';
-      else if (strcasecmp(name,"write_projections")==0)
-	_write_projections = arg[0]=='t' || arg[0]=='T';
-      else if (strcasecmp(name,"adjust_stats")==0)
-        _adjust_stats = v_ul;
-      else if (strcasecmp(name,"adjust_pv")==0)
-        _adjust_pv = string(arg);
-      else
-        printf("Unknown parameter name %s\n",name);
-    }
-
-    free(linep);
-        
-
-    fclose(f);
-
-    //        _use_ref = 0;  // hardwire
-    _sp .fit_ratio(_use_ref==2); _sp .ratio_fit().fit_p1(_ref_fit_p1);
-    _ref.fit_ratio(_use_ref==2); _ref.ratio_fit().fit_p1(_ref_fit_p1);
-
-    _flt_center_ps = _calib_p0 + _calib_p1*double(cols>>1) + _calib_p2*double(cols*cols>>2);
-
-    // Load reference
-    char buff[128];
-    const char* dir = getenv("HOME");
-    sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", _phy);
-    _sp.load_ref(buff);
-
-    printf("TT use_ref %u\n",_use_ref);
+  m_put_key = svc.config("base_name",m_put_key);
+  unsigned phy = svc.config("phy",m_get_key);
+  if (phy) {
+    _src = DetInfo(getpid(),
+                   (DetInfo::Detector)((phy>>24)&0xff), ((phy>>16)&0xff),
+                   (DetInfo::Device  )((phy>> 8)&0xff), ((phy>> 0)&0xff));
   }
-  else
-    printf("Failed to open %s [%s]\n",buff,_fname.c_str());
+  else {
+    std::string s = svc.config("phy",std::string());
+    Pds::DetInfo det(s.c_str());
+    if (det.detector()<Pds::DetInfo::NumDetector) {
+      _src = det;
+    }
+    else {
+      _src = Pds::BldInfo(s.c_str());
+    }
+  }
+  m_get_key = _src.phy();
+  
+  m_event_code_no_beam   = svc.config("event_code_bykik"   ,m_event_code_no_beam);
+  m_event_code_no_laser  = svc.config("event_code_no_laser",m_event_code_no_laser);
+
+  {
+    std::string s = svc.config("ipm_beam_src",std::string());
+    if (s.empty())
+      m_ipm_get_key   = Pds::DetInfo("None");
+    else {
+      Pds::DetInfo det(s.c_str());
+      if (det.detector()<Pds::DetInfo::NumDetector)
+        m_ipm_get_key = det;
+      else
+        m_ipm_get_key = Pds::BldInfo(s.c_str());
+    }
+  }
+
+  m_ipm_beam_threshold  = svc.config("ipm_beam_threshold",0.);
+  m_calib_poly          = svc.config("calib_poly",m_calib_poly);
+
+  {
+    std::string a = svc.config("project",std::string("X"));
+    m_projectX = (a[0]=='x' || a[0]=='X');
+    printf("project %c [%c]\n", m_projectX ? 'X' : 'Y',a[0]);
+  }
+
+  m_proj_cut        = svc.config("sig_cut" ,0);
+  m_proj_cut        = svc.config("proj_cut",m_proj_cut);
+
+  m_frame_roi[0] = m_frame_roi[1] = 0;
+
+  std::vector<unsigned> sig_roi_x(2);
+  std::vector<unsigned> sig_roi_y(2);
+  std::vector<unsigned> sb_roi_x(2);
+  std::vector<unsigned> sb_roi_y(2);
+
+  sig_roi_y[0]     = svc.config("sig_top",0);
+  sig_roi_y[1]     = svc.config("sig_bot",1023);
+  sb_roi_y[0]      = svc.config("sb_top",0);
+  sb_roi_y[1]      = svc.config("sb_bot",0);
+  sig_roi_x[0]     = sb_roi_x[0] = svc.config("spec_begin",0);
+  sig_roi_x[1]     = sb_roi_x[1] = svc.config("spec_end",1023);
+
+  if (sb_roi_y[0]!=sb_roi_y[1] &&
+      sb_roi_x[0]!=sb_roi_x[1]) {
+    if (m_projectX) {
+      if (sb_roi_x[0]!=sig_roi_x[0] ||
+          sb_roi_x[1]!=sig_roi_x[1]) {
+        sb_roi_x[0] = sig_roi_x[0];
+        sb_roi_x[1] = sig_roi_x[1];
+        printf("TimeTool: Signal and sideband roi x ranges differ.  Setting sideband roi to signal.\n");
+      }
+      if ((sb_roi_y[1]-sb_roi_y[0]) != (sig_roi_y[1]-sig_roi_y[0])) {
+        throw std::string("TimeTool: Signal and sideband roi y range sizes differ.");
+      }
+    }
+    else {
+      if (sb_roi_y[0]!=sig_roi_y[0] ||
+          sb_roi_y[1]!=sig_roi_y[1]) {
+        sb_roi_y[0] = sig_roi_y[0];
+        sb_roi_y[1] = sig_roi_y[1];
+        printf("TimeTool: Signal and sideband roi y ranges differ.  Setting sideband roi to signal.\n");
+      }
+      if ((sb_roi_x[1]-sb_roi_x[0]) != (sig_roi_x[1]-sig_roi_x[0])) {
+        throw std::string("TimeTool: Signal and sideband roi x range sizes differ.");
+      }
+    }
+    m_sb_roi_lo[0] = sb_roi_y[0];
+    m_sb_roi_hi[0] = sb_roi_y[1];
+    m_sb_roi_lo[1] = sb_roi_x[0];
+    m_sb_roi_hi[1] = sb_roi_x[1];
+  }
+  else {
+    m_sb_roi_lo[0] = m_sb_roi_hi[0] = 0;
+    m_sb_roi_lo[1] = m_sb_roi_hi[1] = 0;
+  }
+
+  m_sig_roi_lo[0] = sig_roi_y[0];
+  m_sig_roi_hi[0] = sig_roi_y[1];
+  m_sig_roi_lo[1] = sig_roi_x[0];
+  m_sig_roi_hi[1] = sig_roi_x[1];
+
+  m_sb_convergence  = svc.config("sb_convergence",0.05);
+  m_ref_convergence = svc.config("ref_convergence",1.);
+  _indicator_offset= svc.config("indicator_offset",0);
+
+  {
+    std::vector<double> w = svc.config("weights",std::vector<double>());
+    m_weights = make_ndarray<double>(w.size());
+    //  Reverse the ordering of the weights for the
+    //  psalg::finite_impulse_response implementation
+    for(unsigned i=0; i<w.size(); i++)
+      m_weights[i] = w[w.size()-i-1];
+  }
+
+  _write_image       = svc.config("write_image",true);
+  _write_projections = svc.config("write_projections",false);
+
+  // Load reference
+  { const char* dir = getenv("HOME");
+    sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
+    std::vector<double> r;
+    FILE* rf = fopen(buff,"r");
+    if (rf) {
+      float rv;
+      while( fscanf(rf,"%f",&rv)>0 )
+        r.push_back(rv);
+      if (r.size()==sig_roi_x[1]-sig_roi_x[0]+1) {
+        m_ref = make_ndarray<double>(r.size());
+        for(unsigned i=0; i<r.size(); i++)
+          m_ref[i] = r[i];
+      }
+      else {
+        printf("Reference in %s size %zu does not match spec_begin/end[%u/%u]\n",
+               buff, r.size(), sig_roi_x[0], sig_roi_x[1]);
+      }
+      fclose(rf);
+    }
+  }
+
+  m_pedestal = 32;
 }
 
 void Fex::reset() 
 {
-  _nfits=0;
-  _amplitude=_raw_position=_flt_position=_flt_position_ps=_flt_fwhm=_nxt_amplitude=_ref_amplitude=0;
+  _flt_position  = 0;
+  _flt_position_ps = 0;
+  _flt_fwhm      = 0;
+  _amplitude     = 0;
+  _ref_amplitude = 0;
+  _nxt_amplitude = -1;
 }
 
-void Fex::analyze(const Pds::Camera::FrameV1& frame,
-                  bool bykik, bool no_laser)
+void Fex::analyze(const ndarray<const uint16_t,2>& f,
+                  const ndarray<const Pds::EvrData::FIFOEvent,1>& evr,
+                  const Pds::Lusi::IpmFexV1* ipm)
 {
-  if (_projectX) {
-    project_spectrumX(frame, 
-                      _sig_top, _sig_bot,
-                      _spec_begin, _spec_end,
-                      sig);
-    project_spectrumX(frame, 
-                      _sb_top, _sb_bot,
-                      _spec_begin, _spec_end,
-                      sb);
-    if (_use_ref)
-      project_spectrumX(frame, 
-                        _ref_top, _ref_bot,
-                        _spec_begin, _spec_end,
-                        ref);
+  bool nobeam  = false;
+  bool nolaser = false;
+  //
+  //  Beam is absent if BYKIK fired
+  //
+  unsigned ec_nobeam  = unsigned(abs(m_event_code_no_beam));
+  unsigned ec_nolaser = unsigned(abs(m_event_code_no_laser));
+  for(unsigned i=0; i<evr.shape()[0]; i++) {
+    nobeam  |= (evr[i].eventCode()==ec_nobeam);
+    nolaser |= (evr[i].eventCode()==ec_nolaser);
+  }
+
+  if (m_event_code_no_beam  < 0) nobeam  =!nobeam;
+  if (m_event_code_no_laser < 0) nolaser =!nolaser;
+
+  if (nolaser) return;
+
+  //
+  //  Beam is absent if not enough signal on the IPM detector
+  //
+  if (ipm)
+    nobeam |= ipm->sum() < m_ipm_beam_threshold;
+
+  if (!f.size()) return;
+
+  std::string msg;
+  for(unsigned i=0; i<2; i++) {
+    if (m_sig_roi_hi[i] >= f.shape()[i]) {
+      if (m_projectX == (i==0)) {
+        std::stringstream s;
+        s << "Timetool: signal " << (i==0 ? 'Y':'X') << " upper bound ["
+          << m_sig_roi_hi[i] << "] exceeds frame bounds ["
+          << f.shape()[i] << "].";
+        msg += s.str();
+      }
+      m_sig_roi_hi[i] = f.shape()[i]-1;
+    }
+    if (m_sb_roi_hi[i] >= f.shape()[i]) {
+      if (m_projectX == (i==0)) {
+        std::stringstream s;
+        s << "Timetool: sideband " << (i==0 ? 'Y':'X') << " upper bound ["
+          << m_sb_roi_hi[i] << "] exceeds frame bounds ["
+          << f.shape()[i] << "].";
+        msg += s.str();
+      }
+      m_sb_roi_hi[i] = f.shape()[i]-1;
+    }
+  }
+  if (!msg.empty())
+    throw msg;
+
+  //
+  //  Project signal ROI
+  //
+  unsigned pdim = m_projectX ? 1:0;
+  ndarray<const int,1> sig = psalg::project(f,
+                                            m_sig_roi_lo,
+                                            m_sig_roi_hi,
+                                            m_pedestal, pdim);
+
+  //
+  //  Calculate sideband correction
+  //
+  ndarray<const int,1> sb;
+  if (m_sb_roi_lo[0]!=m_sb_roi_hi[0])
+    sb = psalg::project(f,
+                        m_sb_roi_lo ,
+                        m_sb_roi_hi,
+                        m_pedestal, pdim);
+
+  ndarray<double,1> sigd = make_ndarray<double>(sig.shape()[0]);
+
+  //
+  //  Correct projection for common mode found in sideband
+  //
+  if (sb.size()) {
+    psalg::rolling_average(sb, m_sb_avg, m_sb_convergence);
+
+    ndarray<const double,1> sbc = psalg::commonModeLROE(sb, m_sb_avg);
+
+    for(unsigned i=0; i<sig.shape()[0]; i++)
+      sigd[i] = double(sig[i])-sbc[i];
   }
   else {
-    project_spectrumY(frame, 
-                      _sig_top, _sig_bot,
-                      _spec_begin, _spec_end,
-                      sig);
-    project_spectrumY(frame, 
-                      _sb_top, _sb_bot,
-                      _spec_begin, _spec_end,
-                      sb);
-    if (_use_ref)
-      project_spectrumY(frame, 
-                        _ref_top, _ref_bot,
-                        _spec_begin, _spec_end,
-                        ref);
+    for(unsigned i=0; i<sig.shape()[0]; i++)
+      sigd[i] = double(sig[i]);
   }
 
-  analyze(sig, sb, ref, bykik, no_laser);
-}
+  //
+  //  Require projection has a minimum amplitude (else no laser)
+  //
+  bool lcut=true;
+  for(unsigned i=0; i<sig.shape()[0]; i++)
+    if (sigd[i]>m_proj_cut)
+      lcut=false;
 
-void Fex::analyze(const uint32_t* u_sig,
-		  const uint32_t* u_sb,
-		  const uint32_t* u_ref,
-                  bool bykik, bool no_laser)
-{
-#ifdef DBUG
-  printf("Fex::analyze bykik %c  no_laser %c\n",
-         bykik ? 't':'f', no_laser ? 't':'f');
-#endif
+  if (lcut) return;
 
-  reset();
-
-  if (no_laser) return;
-
-  double* sbwf = _sb.process(u_sb);
-
-  if (bykik) {
-    //  Add ratio fit results to correlation
-    if (_use_ref==2) {
-      _ref.process_ref(u_ref,sbwf,_ref_cut);
-      _sp .process_ref(u_sig,sbwf,_sig_cut);
-      _ref_corr.accum (_ref.ratio_fit(),_sp.ratio_fit());
-      _monitor_corr   (_ref.ratio_fit(),_sp.ratio_fit());
-    }
-    else {
-      _monitor_ref_sig( _sp .process_ref(u_sig,sbwf,_sig_cut) );
-    }
+  if (nobeam) {
+    _monitor_ref_sig( sigd );
+    psalg::rolling_average(ndarray<const double,1>(sigd),
+                           m_ref, m_ref_convergence);
+    return;
   }
-  else {
-    _monitor_raw_sig( u_sig, sbwf );
 
-    double* sigwf;
-    if (_use_ref==2) {
-      //  Use ratio fit correlation to correct spectra changes
-      _monitor_ref_sig( _ref.process_ref(u_ref,sbwf,_ref_cut) );
-      sigwf = _sp.process_sig(u_sig,sbwf,_sig_cut,
-                              _ref_corr.p0(_ref.ratio_fit().p0()),
-                              _ref_corr.p1(_ref.ratio_fit().p1()));
-    }
-    else if (_use_ref==1) {
-      //  Use reference trace as a straight substitution
-      double* rref = _ref.process_ref(u_ref,sbwf,_ref_cut);
-      _monitor_ref_sig( rref );
-      sigwf = _sp.process_sig(u_sig,sbwf,_sig_cut,rref);
-    }
-    else {
-      sigwf = _sp.process_sig(u_sig,sbwf,_sig_cut);
-    }
+  _monitor_raw_sig( sigd );
 
-    if (!sigwf) return;
+  if (m_ref.size()==0)
+    return;
 
-    _monitor_sub_sig( sigwf );
+  //
+  //  Divide by the reference
+  //
+  for(unsigned i=0; i<sig.shape()[0]; i++)
+    sigd[i] = sigd[i]/m_ref[i] - 1;
 
-    double* qwf  = new double[cols];
-    double* qwfe = new double[cols];
-    const double noise=25.;
+  _monitor_sub_sig( sigd );
 
-    unsigned x0 = _nwts+_spec_begin;
-    for(int i=0; i<cols; i++)
-      qwf[i] = 0;
-    for(int i=x0; i<=_spec_end; i++) {
-      for(int j=0; j<int(_nwts); j++)
-        qwf[i] += _wts[j]*sigwf[i-j];
-      qwfe[i] = _wtsig*noise;
-    }
+  //
+  //  Apply the digital filter
+  //
+  ndarray<double,1> qwf = psalg::finite_impulse_response(m_weights,sigd);
 
-    _monitor_flt_sig( qwf );
+  _monitor_flt_sig( qwf );
 
-    std::list<int> peaks;
+  //
+  //  Find the two highest peaks that are well-separated
+  //
+  const double afrac = 0.50;
+  std::list<unsigned> peaks =
+    psalg::find_peaks(qwf, afrac, 2);
 
-    double amax    = qwf[x0] > 0 ? qwf[x0] : 0;
-    double aleft   = amax;
-    double aright  = 0;
-    unsigned imax  = x0;
-    const double afrac = 0.50;
+  unsigned nfits = peaks.size();
+  if (nfits>0) {
+    unsigned ix = *peaks.begin();
+    ndarray<double,1> pFit0 = psalg::parab_fit(qwf,ix,0.8);
+    if (pFit0[2]>0) {
+      double   xflt = pFit0[1]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
 
-    _nfits = 0;
-    bool lpeak = false;
+      double  xfltc = 0;
+      for(unsigned i=m_calib_poly.size(); i!=0; )
+        xfltc = xfltc*xflt + m_calib_poly[--i];
 
-    for(int i=x0+1; i<_spec_end; i++) {
-      if (qwf[i] > amax) {
-        amax = qwf[i];
-        if (amax*afrac > aleft) {
-          imax = i;
-          lpeak  = true;
-          aright = afrac*amax;
-        } 
-      }
-      else if (lpeak && qwf[i] < aright) {
-        if (peaks.size()==MaxFits && qwf[peaks.back()&0xffff]>amax)
-          ;
-        else {
-          int word = (i<<16) | imax;
-              
-          if (peaks.size()==MaxFits)
-            peaks.pop_back();
+      _amplitude = pFit0[0];
+      _flt_position  = xflt;
+      _flt_position_ps  = xfltc;
+      _flt_fwhm      = pFit0[2];
+      _ref_amplitude = m_ref[ix];
 
-          int sz = peaks.size();
-          for(std::list<int>::iterator it=peaks.begin(); it!=peaks.end(); it++)
-            if (qwf[(*it)&0xffff]<amax) {
-              peaks.insert(it,word);
-              break;
-            }
-          if (sz == int(peaks.size()))
-            peaks.push_back(word);
-        }
-
-        lpeak = false;
-        amax  = aleft = (qwf[i]>0 ? qwf[i] : 0);
-      }
-      else if (!lpeak && qwf[i] < aleft) {
-        amax = aleft = (qwf[i] > 0 ? qwf[i] : 0);
+      if (nfits>1) {
+        ndarray<double,1> pFit1 =
+          psalg::parab_fit(qwf,*(++peaks.begin()),0.8);
+        if (pFit1[2]>0)
+          _nxt_amplitude = pFit1[0];
       }
     }
-
-#ifdef DBUG
-    printf("peaks %d  amax %f  imax %d  aleft %f  aright %f\n",
-           peaks.size(), amax, imax, aleft, aright);
-#endif
-
-    //      for(std::list<int>::const_iterator it=peaks.begin(); it!=peaks.end(); it++, _nfits++)
-    //        _fits[_nfits].process(qwf,qwfe,*it,_nwts);
-
-    _flt_position  = 0;
-    _flt_fwhm      = 0;
-    _amplitude     = 0;
-    _nxt_amplitude = -1;
-    _nfits = peaks.size();
-    if (_nfits>0) {
-      int word = *peaks.begin();
-      int ix   = word&0xffff;
-      _raw_position = ix;
-      _fits[0].process(qwf,qwfe,word,_nwts, cols);
-      if (_fits[0].valid()) {
-        double x = _fits[0].position();
-        _flt_position = x;
-        _flt_position_ps   = _calib_p0 + x*_calib_p1 + x*x*_calib_p2;
-        _flt_fwhm     = _fits[0].fwhm();
-        _amplitude    = _fits[0].amplitude();
-        _ref_amplitude= _use_ref ? _ref.ref()[ix] : _sp.ref()[ix];
-        _nxt_amplitude = -1;
-        if (_nfits>1) {
-          _fits[1].process(qwf,qwfe,*(++peaks.begin()),_nwts, cols);
-          if (_fits[1].valid())
-            _nxt_amplitude = _fits[1].amplitude();
-        }
-      }
-    }
-    delete[] qwf;
-    delete[] qwfe;
   }
 }
