@@ -371,7 +371,7 @@ namespace Pds {
     }
     QueuedFex(InDatagram* dg, TimeToolA* app, FexApp* fex, Semaphore* sem) 
       : _dg(dg), _app(app), _fex(fex), 
-        _fifo(0), _sem(sem) {}
+        _sem(sem) {}
     ~QueuedFex() {}
   public:
     void routine() {
@@ -411,7 +411,7 @@ Transition* TimeToolA::transitions(Transition* tr)
 InDatagram* TimeToolA::events(InDatagram* dg)
 {
   if (dg->datagram().seq.service()==TransitionId::L1Accept) {
-    uint32_t b = 1 << (dg->datagram().seq.stamp().vector()&0x1f);
+    uint32_t b = (dg->datagram().seq.stamp().vector()&0x1f);
     _task->call(new QueuedFex(dg, this, _fex, _evr[b]));
     _evr[b].clear();
   }
