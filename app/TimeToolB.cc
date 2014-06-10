@@ -1,4 +1,4 @@
-#include "TimeToolA.hh"
+#include "TimeToolB.hh"
 
 #include "pds/service/Task.hh"
 #include "pds/service/TaskObject.hh"
@@ -23,6 +23,8 @@
 #include "pdsdata/psddl/encoder.ddl.h"
 #include "pdsdata/psddl/epics.ddl.h"
 
+#include "psalg/psalg.h"
+
 #include "pds/epicstools/PVWriter.hh"
 #include "timetool/service/Fex.hh"
 
@@ -31,6 +33,7 @@
 #include <string>
 #include <new>
 #include <fstream>
+#include <map>
 
 using std::string;
 
@@ -182,8 +185,23 @@ namespace Pds {
   private:
     uint32_t*& _pwrite;
   };
-  
-  class FexApp : public XtcIterator {
+
+  //
+  //  A class to collect the references from each of the threads
+  //
+  class Fex    : public TimeTool::Fex {
+  public:
+    Fex(const char* fname);
+    ~Fex();
+  public:
+    void _monitor_raw_sig (const ndarray<const double,1>&);
+    void _monitor_ref_sig (const ndarray<const double,1>&);
+  };
+    
+  //
+  //  The appliance that runs in each thread
+  //
+  class FexApp : public Appliance, public XtcIterator {
   public:
     FexApp(const char* fname, Appliance& app) : 
       _app      (app),
@@ -199,10 +217,10 @@ namespace Pds {
           string sline;
           std::getline(f,sline);
           if (sline[0]=='<')
-            _fex.push_back(new TimeTool::Fex(sline.substr(1).c_str()));
+            _fex.push_back(new Fex(sline.substr(1).c_str()));
         }
         if (_fex.size()==0)
-          _fex.push_back(new TimeTool::Fex(fname));
+          _fex.push_back(new Fex(fname));
         _frame    .resize(_fex.size());
         _pv_writer.resize(_fex.size());
         _pXtc     .resize(_fex.size());
@@ -260,8 +278,7 @@ namespace Pds {
       }
       return tr;
     }
-    InDatagram* events(InDatagram* dg,
-                       const ndarray<const Pds::EvrData::FIFOEvent,1>& fifo) {
+    InDatagram* events(InDatagram* dg) {
       switch(dg->datagram().seq.service()) {
       case TransitionId::L1Accept:
         { //  Add an encoder data object
@@ -271,7 +288,17 @@ namespace Pds {
           const Src& src = reinterpret_cast<Xtc*>(dg->xtc.payload())->src;
           
           iterate(&dg->xtc);
-          
+
+          //
+          //  Decode the EVR FIFO from the tail of the datagram
+          //
+          const uint32_t* v = reinterpret_cast<const uint32_t*>
+            (dg->xtc.payload()+dg->xtc.sizeofPayload());
+          ndarray<Pds::EvrData::FIFOEvent,1> fifo = 
+            make_ndarray<Pds::EvrData::FIFOEvent>(v[0]);
+          for(unsigned i=0; i<v[0]; i++)
+            fifo[i] = Pds::EvrData::FIFOEvent(0,0,v[i+1]);
+
           for(unsigned i=0; i<_fex.size(); i++) {
             if (_frame[i]) {
               TimeTool::Fex& fex = *_fex[i];
@@ -372,71 +399,93 @@ namespace Pds {
   };
 
 
-  class QueuedFex : public Routine {
-  public:
-    QueuedFex(InDatagram* dg, TimeToolA* app, FexApp* fex, 
-              std::vector<Pds::EvrData::FIFOEvent>& fifo)
-      : _dg(dg), _app(app), _fex(fex), 
-        _fifo(make_ndarray<Pds::EvrData::FIFOEvent>(fifo.size())),
-        _sem(0) 
-    {
-      for(unsigned i=0; i<fifo.size(); i++)
-        _fifo[i] = fifo[i];
-    }
-    QueuedFex(InDatagram* dg, TimeToolA* app, FexApp* fex, Semaphore* sem) 
-      : _dg(dg), _app(app), _fex(fex), 
-        _sem(sem) {}
-    ~QueuedFex() {}
-  public:
-    void routine() {
-
-      _app->post(_fex->events(_dg,_fifo));
-
-      if (_sem) _sem->give();
-      delete this;
-    }
-  private:
-    InDatagram* _dg;
-    TimeToolA*   _app;
-    FexApp*     _fex;
-    ndarray<Pds::EvrData::FIFOEvent,1> _fifo;
-    Semaphore*  _sem;
-  };
 };
 
-TimeToolA::TimeToolA() :
-  _task(new Task(TaskObject("ttool"))),
-  _fex (new FexApp("timetool.input",*this)),
-  _sem (Semaphore::EMPTY),
+
+Fex::Fex(const char* fname) :
+  TimeTool::Fex(fname)
+{
+}
+
+Fex::~Fex()
+{
+}
+
+typedef std::map<Pds::Src,ndarray<double,1> > MapType;
+
+static MapType _ref;
+static Semaphore _sem(Semaphore::FULL);
+
+//
+//  Ideally, each thread's 'm_ref' array would reference the
+//  same ndarray, but then I would need to control exclusive
+//  access during the reference updates
+//
+void Fex::_monitor_raw_sig (const ndarray<const double,1>&) 
+{
+  MapType::iterator it = _ref.find(_src);
+  if (it != _ref.end())
+    std::copy(it->second.begin(), it->second.end(), m_ref.begin());
+}
+
+void Fex::_monitor_ref_sig (const ndarray<const double,1>& ref) 
+{
+  MapType::iterator it = _ref.find(_src);
+  if (it == _ref.end()) {
+    ndarray<double,1> a = make_ndarray<double>(ref.size());
+    std::copy(ref.begin(), ref.end(), a.begin());
+    _sem.take();
+    _ref[_src] = a;
+    _sem.give();
+  }
+  else {
+    _sem.take();
+    psalg::rolling_average(ref, it->second, m_ref_convergence);
+    _sem.give();
+  }
+}
+ 
+
+static std::vector<Appliance*> _apps; 
+const std::vector<Appliance*> apps(Appliance& a)
+{
+  for(unsigned i=0; i<4; i++)
+    _apps.push_back(new FexApp("timetool.input",a));
+  return _apps;
+}
+ 
+TimeToolB::TimeToolB() :
+  WorkThreads("ttool", apps(*this)),
   _evr (32)
 {
 }
 
-TimeToolA::~TimeToolA()
+TimeToolB::~TimeToolB()
 {
-  delete _fex;
+  for(unsigned i=0; i<_apps.size(); i++)
+    delete _apps[i];
+  _apps.clear();
 }
 
-Transition* TimeToolA::transitions(Transition* tr)
-{
-  return _fex->transitions(tr);
-}
-
-InDatagram* TimeToolA::events(InDatagram* dg)
+InDatagram* TimeToolB::events(InDatagram* dg)
 {
   if (dg->datagram().seq.service()==TransitionId::L1Accept) {
+    //
+    //  Encode the EVR FIFO onto the tail of this datagram
+    //
     uint32_t b = (dg->datagram().seq.stamp().vector()&0x1f);
-    _task->call(new QueuedFex(dg, this, _fex, _evr[b]));
+    const Xtc& xtc = dg->datagram().xtc;
+    uint32_t* v = reinterpret_cast<uint32_t*>(xtc.payload()+xtc.sizeofPayload());
+    const std::vector<Pds::EvrData::FIFOEvent>& fifo = _evr[b];
+    v[0] = fifo.size();
+    for(unsigned i=0; i<fifo.size(); i++)
+      v[i+1] = fifo[i].eventCode();
     _evr[b].clear();
   }
-  else {
-    _task->call(new QueuedFex(dg, this, _fex, &_sem));
-    _sem.take();
-  }
-  return (InDatagram*)Appliance::DontDelete;
+  return WorkThreads::events(dg);
 }
 
-Occurrence* TimeToolA::occurrences(Occurrence* occ) {
+Occurrence* TimeToolB::occurrences(Occurrence* occ) {
   if (occ->id() == OccurrenceId::EvrCommand) {
     const EvrCommand& cmd = *reinterpret_cast<const EvrCommand*>(occ);
     _evr[(cmd.seq.stamp().vector()&0x1f)].push_back(Pds::EvrData::FIFOEvent(0,0,cmd.code));
@@ -448,6 +497,6 @@ Occurrence* TimeToolA::occurrences(Occurrence* occ) {
 //  Plug-in module creator
 //
 
-extern "C" Appliance* create() { return new TimeToolA; }
+extern "C" Appliance* create() { return new TimeToolB; }
 
 extern "C" void destroy(Appliance* p) { delete p; }

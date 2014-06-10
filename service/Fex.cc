@@ -20,7 +20,7 @@ using namespace TimeTool;
 //#define DBUG
 
 Fex::Fex(const char* fname) :
-  _fname(fname+strspn(fname," \t")) 
+  _fname(fname+strspn(fname," \t"))
 {
 }
 
@@ -115,12 +115,22 @@ void Fex::configure()
   std::vector<unsigned> sb_roi_x(2);
   std::vector<unsigned> sb_roi_y(2);
 
-  sig_roi_y[0]     = svc.config("sig_top",0);
-  sig_roi_y[1]     = svc.config("sig_bot",1023);
-  sb_roi_y[0]      = svc.config("sb_top",0);
-  sb_roi_y[1]      = svc.config("sb_bot",0);
-  sig_roi_x[0]     = sb_roi_x[0] = svc.config("spec_begin",0);
-  sig_roi_x[1]     = sb_roi_x[1] = svc.config("spec_end",1023);
+  if (m_projectX) {
+    sig_roi_y[0]     = svc.config("sig_top",0);
+    sig_roi_y[1]     = svc.config("sig_bot",1023);
+    sb_roi_y[0]      = svc.config("sb_top",0);
+    sb_roi_y[1]      = svc.config("sb_bot",0);
+    sig_roi_x[0]     = sb_roi_x[0] = svc.config("spec_begin",0);
+    sig_roi_x[1]     = sb_roi_x[1] = svc.config("spec_end",1023);
+  }
+  else {
+    sig_roi_x[0]     = svc.config("sig_top",0);
+    sig_roi_x[1]     = svc.config("sig_bot",1023);
+    sb_roi_x[0]      = svc.config("sb_top",0);
+    sb_roi_x[1]      = svc.config("sb_bot",0);
+    sig_roi_y[0]     = sb_roi_y[0] = svc.config("spec_begin",0);
+    sig_roi_y[1]     = sb_roi_y[1] = svc.config("spec_end",1023);
+  }
 
   if (sb_roi_y[0]!=sb_roi_y[1] &&
       sb_roi_x[0]!=sb_roi_x[1]) {
