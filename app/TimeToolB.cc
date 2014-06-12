@@ -35,6 +35,8 @@
 #include <fstream>
 #include <map>
 
+#define NWORK_THREADS 8
+
 using std::string;
 
 typedef Pds::Opal1k::ConfigV1 Opal1kConfig;
@@ -449,7 +451,7 @@ void Fex::_monitor_ref_sig (const ndarray<const double,1>& ref)
 static std::vector<Appliance*> _apps; 
 const std::vector<Appliance*> apps(Appliance& a)
 {
-  for(unsigned i=0; i<4; i++)
+  for(unsigned i=0; i<NWORK_THREADS; i++)
     _apps.push_back(new FexApp("timetool.input",a));
   return _apps;
 }
