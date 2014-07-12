@@ -341,7 +341,8 @@ namespace Pds {
           TimeTool::Fex& fex = *_fex[i];
           if (fex.m_get_key == xtc->src.phy()) {
             InDatagram* dg = _dg;
-            const Src& src = fex.src();
+            //const Src& src = fex.src();
+            const Src& src = xtc->src;
             _insert_pv(dg, src, 0, fex.base_name()+":AMPL");
             _insert_pv(dg, src, 1, fex.base_name()+":FLTPOS");
             _insert_pv(dg, src, 2, fex.base_name()+":FLTPOS_PS");
