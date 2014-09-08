@@ -1,6 +1,8 @@
 #include "Config.hh"
 
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static const char* delim = " \t\n";
 
@@ -13,7 +15,7 @@ public:
 private:
   const char* _arg;
 };
- 
+
 template <typename T>
 class ResultSeq {
 public:
@@ -23,30 +25,30 @@ public:
 private:
   mutable char* _arg;
 };
- 
+
 
 template <>
-Result<double>::operator double() const 
+Result<double>::operator double() const
 { return strtod(_arg,NULL); }
 
 template <>
-Result<int>::operator int() const 
+Result<int>::operator int() const
 { return strtol(_arg,NULL,0); }
 
 template <>
-Result<unsigned>::operator unsigned() const 
+Result<unsigned>::operator unsigned() const
 { return strtoul(_arg,NULL,0); }
 
 template <>
-Result<unsigned long long>::operator unsigned long long() const 
+Result<unsigned long long>::operator unsigned long long() const
 { return strtoull(_arg,NULL,0); }
 
 template <>
-Result<std::string>::operator std::string() const 
+Result<std::string>::operator std::string() const
 { return std::string(_arg); }
 
 template <>
-Result<bool>::operator bool() const 
+Result<bool>::operator bool() const
 { return (_arg[0]=='t' || _arg[0]=='T'); }
 
 template <typename T>
@@ -55,7 +57,7 @@ ResultSeq<T>::operator std::vector<T>() const {
   const char* p;
   while((p = strtok_r(0,delim,&_arg))) {
     v.push_back(Result<T>(p));
-  }    
+  }
   return v;
 }
 
@@ -84,7 +86,7 @@ O Config::config(const std::string& name,
   size_t sz = 8 * 1024;
   char* linep = (char *)malloc(sz);
   char* _ptok;
-  
+
   while(getline(&linep, &sz, _f)>0) {
     if (linep[0]=='#')
       continue;
@@ -114,7 +116,7 @@ std::vector<O> Config::config(const std::string& name,
   size_t sz = 8 * 1024;
   char* linep = (char *)malloc(sz);
   char* _ptok;
-  
+
   while(getline(&linep, &sz, _f)>0) {
     if (linep[0]=='#')
       continue;
