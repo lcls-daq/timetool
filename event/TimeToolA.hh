@@ -25,9 +25,9 @@ namespace Pds_TimeTool_event {
     Transition* transitions(Transition*);
     InDatagram* events     (InDatagram*);
     int         process    (Xtc* xtc);
-    const TimeTool::Fex& fex() const { return _fex; }
+    const ::TimeTool::Fex& fex() const { return _fex; }
   private:
-    TimeTool::Fex _fex;
+    ::TimeTool::Fex _fex;
     const Camera::FrameV1* _frame;
     Pds::EvrData::DataV3* _evrdata;
     Pds::Lusi::IpmFexV1* _ipmdata;

@@ -5,18 +5,23 @@
 #include "pdsdata/psddl/camera.ddl.h"
 #include "pdsdata/psddl/evr.ddl.h"
 #include "pdsdata/psddl/lusi.ddl.h"
+#include "pdsdata/psddl/timetool.ddl.h"
 #include "ndarray/ndarray.h"
 
 #include <string>
 using std::string;
 
-namespace Pds { namespace Camera { class FrameV1; } }
+#include <vector>
+
+namespace Pds { 
+  namespace Camera { class FrameV1; } 
+};
 
 namespace TimeTool {
-
   class Fex {
   public:
     Fex(const char* fname="timetool.input");
+    Fex(const Pds::Src&, const Pds::TimeTool::ConfigV1&);
     virtual ~Fex();
   public:
     void init_plots();
@@ -55,8 +60,8 @@ namespace TimeTool {
     string   m_put_key;
     Pds::Src _src;
 
-    int m_event_code_no_beam ; // use this eventcode for detecting no beam
-    int m_event_code_no_laser; // use this eventcode for skipping (no laser)
+    ndarray<Pds::TimeTool::EventLogic,1> m_beam_logic;
+    ndarray<Pds::TimeTool::EventLogic,1> m_laser_logic;
 
     Pds::Src m_ipm_get_key;  // use this ipm threshold for detecting no beam
     double   m_ipm_beam_threshold;
@@ -94,6 +99,8 @@ namespace TimeTool {
     double _ref_amplitude;
 
     int _indicator_offset;
+
+    std::vector<unsigned> _cut;
   };
 
 };

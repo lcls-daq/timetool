@@ -36,7 +36,7 @@ public:
     if (_f) fclose(_f);
     _f = 0;
   }
-  void event(InDatagram* dg, const TimeTool::Fex& fex) {
+  void event(InDatagram* dg, const ::TimeTool::Fex& fex) {
     if (_f) {
       double position = fex.filtered_position();
       double amplitude = fex.amplitude();

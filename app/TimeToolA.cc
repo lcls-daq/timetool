@@ -199,10 +199,10 @@ namespace Pds {
           string sline;
           std::getline(f,sline);
           if (sline[0]=='<')
-            _fex.push_back(new TimeTool::Fex(sline.substr(1).c_str()));
+            _fex.push_back(new ::TimeTool::Fex(sline.substr(1).c_str()));
         }
         if (_fex.size()==0)
-          _fex.push_back(new TimeTool::Fex(fname));
+          _fex.push_back(new ::TimeTool::Fex(fname));
         _frame    .resize(_fex.size());
         _pv_writer.resize(_fex.size());
         _pXtc     .resize(_fex.size());
@@ -235,10 +235,12 @@ namespace Pds {
             _pv_writer[i] = 0;
           }
           // configure
-          TimeTool::Fex& fex = *_fex[i];
+          ::TimeTool::Fex& fex = *_fex[i];
           fex.configure();
-          INSERT_CODE(fex.m_event_code_no_beam);
-          INSERT_CODE(fex.m_event_code_no_laser);
+	  for(unsigned k=0; k<fex.m_beam_logic.size(); k++)
+	    INSERT_CODE(fex.m_beam_logic[k].event_code());
+	  for(unsigned k=0; k<fex.m_laser_logic.size(); k++)
+	    INSERT_CODE(fex.m_laser_logic[k].event_code());
 //           if (fex._adjust_stats)
 //             _pv_writer[i] = new PVWriter(fex._adjust_pv.c_str());
         }
@@ -274,7 +276,7 @@ namespace Pds {
           
           for(unsigned i=0; i<_fex.size(); i++) {
             if (_frame[i]) {
-              TimeTool::Fex& fex = *_fex[i];
+              ::TimeTool::Fex& fex = *_fex[i];
               fex.reset();
               
               fex.analyze(_frame[i]->data16(), fifo, 0);
@@ -338,7 +340,7 @@ namespace Pds {
       }
       else if (xtc->contains.id()==TypeId::Id_Opal1kConfig) {
         for(unsigned i=0; i<_fex.size(); i++) {
-          TimeTool::Fex& fex = *_fex[i];
+          ::TimeTool::Fex& fex = *_fex[i];
           if (fex.m_get_key == xtc->src.phy()) {
             InDatagram* dg = _dg;
             //const Src& src = fex.src();
@@ -363,7 +365,7 @@ namespace Pds {
   private:
     Appliance&                          _app;
     GenericPool                         _occPool;
-    std::vector<TimeTool::Fex*        > _fex;
+    std::vector< ::TimeTool::Fex*     > _fex;
     std::vector<const Camera::FrameV1*> _frame;
     std::vector<PVWriter*             > _pv_writer;
     std::vector<boost::shared_ptr<Pds::Xtc> > _pXtc;

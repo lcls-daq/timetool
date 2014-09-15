@@ -1,7 +1,6 @@
 #include "Fex.hh"
 #include "Config.hh"
 
-#include "pdsdata/psddl/camera.ddl.h"
 #include "pdsdata/psddl/opal1k.ddl.h"
 #include "pdsdata/xtc/DetInfo.hh"
 #include "pdsdata/xtc/BldInfo.hh"
@@ -13,9 +12,25 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
+
+//#define DBUG
 
 using Pds::DetInfo;
 using namespace TimeTool;
+
+enum Cuts { NCALLS, NOLASER, FRAMESIZE, PROJCUT, 
+	    NOBEAM, NOREF, NOFITS, NCUTS };
+static const char* cuts[] = {"NCalls",
+			     "NoLaser",
+			     "FrameSize",
+			     "ProjCut",
+			     "NoBeam",
+			     "NoRef",
+			     "NoFits",
+			     NULL };
+
+static ndarray<double,1> load_reference(unsigned key, unsigned sz);
 
 //#define DBUG
 
@@ -24,8 +39,77 @@ Fex::Fex(const char* fname) :
 {
 }
 
+Fex::Fex(const Pds::Src& src,
+	 const Pds::TimeTool::ConfigV1& cfg)
+{
+  m_put_key = std::string((const char*)cfg.base_name().data(),
+			  cfg.base_name_length());
+  _src = src;
+  m_get_key = src.phy();
+
+  m_beam_logic = make_ndarray<Pds::TimeTool::EventLogic>(cfg.beam_logic().size());
+  std::copy(cfg.beam_logic().begin(),
+	    cfg.beam_logic().end(),
+	    m_beam_logic.begin());
+
+  m_laser_logic = make_ndarray<Pds::TimeTool::EventLogic>(cfg.laser_logic().size());
+  std::copy(cfg.laser_logic().begin(),
+	    cfg.laser_logic().end(),
+	    m_laser_logic.begin());
+
+  m_calib_poly.resize(cfg.calib_poly_dim());
+  std::copy(cfg.calib_poly().begin(),cfg.calib_poly().end(),m_calib_poly.data());
+
+  m_projectX = (cfg.project_axis() == Pds::TimeTool::ConfigV1::X);
+
+  m_proj_cut = cfg.signal_cut();
+
+  m_frame_roi[0] = m_frame_roi[1] = 0;
+
+  m_sig_roi_lo[0] = cfg.sig_roi_lo().row();
+  m_sig_roi_lo[1] = cfg.sig_roi_lo().column();
+
+  m_sig_roi_hi[0] = cfg.sig_roi_hi().row();
+  m_sig_roi_hi[1] = cfg.sig_roi_hi().column();
+
+  if (cfg.subtract_sideband()) {
+    m_sb_roi_lo[0] = cfg.sb_roi_lo().row();
+    m_sb_roi_lo[1] = cfg.sb_roi_lo().column();
+    
+    m_sb_roi_hi[0] = cfg.sb_roi_hi().row();
+    m_sb_roi_hi[1] = cfg.sb_roi_hi().column();
+  }
+  else {
+    m_sb_roi_lo[0] = m_sb_roi_hi[0] = 0;
+    m_sb_roi_lo[1] = m_sb_roi_hi[1] = 0;
+  }
+
+  m_sb_convergence  = cfg.sb_convergence();
+  m_ref_convergence = cfg.ref_convergence();
+
+  m_weights = make_ndarray<double>(cfg.number_of_weights());
+  std::copy(cfg.weights().begin(), cfg.weights().end(), m_weights.data());
+
+  _indicator_offset = -cfg.number_of_weights()/2;
+
+  _write_image = cfg.write_image();
+  _write_projections = cfg.write_projections();
+
+  unsigned sz = m_projectX ?
+    m_sig_roi_hi[1]-m_sig_roi_lo[1]+1 :
+    m_sig_roi_hi[0]-m_sig_roi_lo[0]+1;
+
+  m_ref = load_reference(m_get_key,sz);
+
+  m_pedestal = 32;
+
+  _cut.clear();
+  _cut.resize(NCUTS,0);
+}
+
 Fex::~Fex() 
 {
+  unconfigure();
 }
 
 void Fex::init_plots()
@@ -45,6 +129,15 @@ void Fex::unconfigure()
       fprintf(f," %f",m_ref[i]);
     fprintf(f,"\n");
     fclose(f);
+  }
+
+  if (_cut[NCALLS]>0) {
+    printf("TimeTool::Fex Summary\n");
+    for(unsigned i=0; i<NCUTS; i++)
+      printf("%s: %3.2f [%u]\n",
+	     cuts[i], 
+	     double(_cut[i])/double(_cut[NCALLS]),
+	     _cut[i]);
   }
 }
 
@@ -80,8 +173,21 @@ void Fex::configure()
   }
   m_get_key = _src.phy();
   
-  m_event_code_no_beam   = svc.config("event_code_bykik"   ,m_event_code_no_beam);
-  m_event_code_no_laser  = svc.config("event_code_no_laser",m_event_code_no_laser);
+  m_beam_logic = make_ndarray<Pds::TimeTool::EventLogic>(1);
+  { int code = svc.config("event_code_bykik", 162);
+    m_beam_logic[0] = 
+      Pds::TimeTool::EventLogic(abs(code),
+				code>0 ?
+				Pds::TimeTool::EventLogic::L_AND_NOT :
+				Pds::TimeTool::EventLogic::L_AND); }
+
+  m_laser_logic = make_ndarray<Pds::TimeTool::EventLogic>(1);
+  { int code = svc.config("event_code_no_laser", 162);
+    m_laser_logic[0] = 
+      Pds::TimeTool::EventLogic(abs(code),
+				code>0 ?
+				Pds::TimeTool::EventLogic::L_AND_NOT :
+				Pds::TimeTool::EventLogic::L_AND); }
 
   {
     std::string s = svc.config("ipm_beam_src",std::string());
@@ -187,29 +293,12 @@ void Fex::configure()
   _write_image       = svc.config("write_image",true);
   _write_projections = svc.config("write_projections",false);
 
-  // Load reference
-  { const char* dir = getenv("HOME");
-    sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
-    std::vector<double> r;
-    FILE* rf = fopen(buff,"r");
-    if (rf) {
-      float rv;
-      while( fscanf(rf,"%f",&rv)>0 )
-        r.push_back(rv);
-      if (r.size()==sig_roi_x[1]-sig_roi_x[0]+1) {
-        m_ref = make_ndarray<double>(r.size());
-        for(unsigned i=0; i<r.size(); i++)
-          m_ref[i] = r[i];
-      }
-      else {
-        printf("Reference in %s size %zu does not match spec_begin/end[%u/%u]\n",
-               buff, r.size(), sig_roi_x[0], sig_roi_x[1]);
-      }
-      fclose(rf);
-    }
-  }
+  m_ref = load_reference(m_get_key,sig_roi_x[1]-sig_roi_x[0]+1);
 
   m_pedestal = 32;
+
+  _cut.clear();
+  _cut.resize(NCUTS,0);
 }
 
 void Fex::reset() 
@@ -222,26 +311,57 @@ void Fex::reset()
   _nxt_amplitude = -1;
 }
 
+static bool _calculate_logic(const ndarray<const Pds::TimeTool::EventLogic,1>& cfg,
+			     const ndarray<const Pds::EvrData::FIFOEvent,1>& event)
+{
+  bool v = (cfg[0].logic_op() == Pds::TimeTool::EventLogic::L_AND ||
+	    cfg[0].logic_op() == Pds::TimeTool::EventLogic::L_AND_NOT);
+  for(unsigned i=0; i<cfg.size(); i++) {
+    bool p=false;
+    for(unsigned j=0; j<event.size(); j++)
+      if (event[j].eventCode()==cfg[i].event_code()) {
+	p=true;
+	break;
+      }
+    switch(cfg[i].logic_op()) {
+    case Pds::TimeTool::EventLogic::L_OR:
+      v = v||p; break;
+    case Pds::TimeTool::EventLogic::L_AND:
+      v = v&&p; break;
+    case Pds::TimeTool::EventLogic::L_OR_NOT:
+      v = v||!p; break;
+    case Pds::TimeTool::EventLogic::L_AND_NOT:
+      v = v&&!p; break;
+    default: break;
+    }
+  }
+  return v;
+}
+
 void Fex::analyze(const ndarray<const uint16_t,2>& f,
                   const ndarray<const Pds::EvrData::FIFOEvent,1>& evr,
                   const Pds::Lusi::IpmFexV1* ipm)
 {
-  bool nobeam  = false;
-  bool nolaser = false;
-  //
-  //  Beam is absent if BYKIK fired
-  //
-  unsigned ec_nobeam  = unsigned(abs(m_event_code_no_beam));
-  unsigned ec_nolaser = unsigned(abs(m_event_code_no_laser));
-  for(unsigned i=0; i<evr.shape()[0]; i++) {
-    nobeam  |= (evr[i].eventCode()==ec_nobeam);
-    nolaser |= (evr[i].eventCode()==ec_nolaser);
-  }
+  _cut[NCALLS]++;
 
-  if (m_event_code_no_beam  < 0) nobeam  =!nobeam;
-  if (m_event_code_no_laser < 0) nolaser =!nolaser;
+  bool nobeam   = !_calculate_logic(m_beam_logic,
+				    evr);
+  bool nolaser  = !_calculate_logic(m_laser_logic,
+				    evr);
 
-  if (nolaser) return;
+#ifdef DBUG
+  printf("event_codes: ");
+  for(unsigned i=0; i<evr.size(); i++)
+    printf("%d ",evr[i].eventCode());
+  printf("\n");
+
+  printf("%05x [%08x] beam %c  laser %c\n", 
+	 evr[0].timestampHigh(),
+	 1<<(evr[0].timestampLow()&0x1f),
+	 nobeam ? 'F':'T', nolaser ? 'F':'T');
+#endif
+
+  if (nolaser) { _cut[NOLASER]++; return; }
 
   //
   //  Beam is absent if not enough signal on the IPM detector
@@ -249,7 +369,7 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   if (ipm)
     nobeam |= ipm->sum() < m_ipm_beam_threshold;
 
-  if (!f.size()) return;
+  if (!f.size()) { _cut[FRAMESIZE]++; return; }
 
   std::string msg;
   for(unsigned i=0; i<2; i++) {
@@ -322,19 +442,22 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
     if (sigd[i]>m_proj_cut)
       lcut=false;
 
-  if (lcut) return;
+  if (lcut) { _cut[PROJCUT]++; return; }
 
   if (nobeam) {
     _monitor_ref_sig( sigd );
     psalg::rolling_average(ndarray<const double,1>(sigd),
                            m_ref, m_ref_convergence);
+    _cut[NOBEAM]++;
     return;
   }
 
   _monitor_raw_sig( sigd );
 
-  if (m_ref.size()==0)
+  if (m_ref.size()==0) {
+    _cut[NOREF]++;
     return;
+  }
 
   //
   //  Divide by the reference
@@ -383,4 +506,35 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
       }
     }
   }
+  else
+    _cut[NOFITS]++;
+}
+
+ndarray<double,1> load_reference(unsigned key, unsigned sz)
+{
+  char buff[128];
+  ndarray<double,1> m_ref;
+
+  // Load reference
+  { const char* dir = getenv("HOME");
+    sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", key);
+    std::vector<double> r;
+    FILE* rf = fopen(buff,"r");
+    if (rf) {
+      float rv;
+      while( fscanf(rf,"%f",&rv)>0 )
+        r.push_back(rv);
+      if (r.size()==sz) {
+        m_ref = make_ndarray<double>(r.size());
+        for(unsigned i=0; i<r.size(); i++)
+          m_ref[i] = r[i];
+      }
+      else {
+        printf("Reference in %s size %zu does not match [%u]\n",
+               buff, r.size(), sz);
+      }
+      fclose(rf);
+    }
+  }
+  return m_ref;
 }

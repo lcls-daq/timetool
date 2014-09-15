@@ -1,4 +1,4 @@
-#include "TimeToolB.hh"
+#include "TimeToolC.hh"
 
 #include "pds/service/Task.hh"
 #include "pds/service/TaskObject.hh"
@@ -7,6 +7,8 @@
 #include "pds/utility/NullServer.hh"
 #include "pds/utility/Occurrence.hh"
 #include "pds/utility/OccurrenceId.hh"
+#include "pds/config/CfgCache.hh"
+#include "pds/config/TimeToolConfigType.hh"
 
 #include "pdsdata/xtc/TypeId.hh"
 #include "pdsdata/xtc/Xtc.hh"
@@ -135,6 +137,16 @@ static void _insert_projection(InDatagram* dg,
 
 namespace Pds {
 
+  class TimeToolCfgCache : public CfgCache {
+  public:
+    TimeToolCfgCache(const Src& src, 
+		     const TypeId& id,
+		     int size) :
+      CfgCache(src,id,size) {}
+  public:
+    int _size(void* p) const { return reinterpret_cast<TimeToolConfigType*>(p)->_sizeof(); }
+  };
+
   class FrameTrim {
   public:
     FrameTrim(uint32_t*& pwrite) : _pwrite(pwrite) {}
@@ -194,6 +206,7 @@ namespace Pds {
   class Fex    : public ::TimeTool::Fex {
   public:
     Fex(const char* fname);
+    Fex(const Src&, const TimeToolConfigType&);
     ~Fex();
   public:
     void _monitor_raw_sig (const ndarray<const double,1>&);
@@ -205,87 +218,22 @@ namespace Pds {
   //
   class FexApp : public Appliance, public XtcIterator {
   public:
-    FexApp(const char* fname, Appliance& app) : 
-      _app      (app),
-      _occPool  (sizeof(UserMessage),4),
-      _pv_writer(0) 
-    {
-      char buff[128];
-      const char* dir = getenv("HOME");
-      sprintf(buff,"%s/%s", dir ? dir : "/tmp", fname);
-      std::ifstream f(buff);
-      if (f) {
-        while(!f.eof()) {
-          string sline;
-          std::getline(f,sline);
-          if (sline[0]=='<')
-            _fex.push_back(new Fex(sline.substr(1).c_str()));
-        }
-        if (_fex.size()==0)
-          _fex.push_back(new Fex(fname));
-        _frame    .resize(_fex.size());
-        _pv_writer.resize(_fex.size());
-        _pXtc     .resize(_fex.size());
-      }
-    }
-    ~FexApp() {
-      for(unsigned i=0; i<_fex.size(); i++) {
-        delete _fex[i];
-        if (_pv_writer[i])
-          delete _pv_writer[i];
-      }
-    }
+    FexApp() {}
+    ~FexApp() {}
   public:
     Transition* transitions(Transition* tr) {
-      if (tr->id()==TransitionId::Configure) {
-        std::vector<unsigned> requested_codes;
-
-#define INSERT_CODE(c) {                                                \
-          if (c) {                                                      \
-            bool lfound=false;                                          \
-            unsigned co=abs(c);                                         \
-            for(unsigned i=0; i<requested_codes.size(); i++)            \
-              if (requested_codes[i]==co) { lfound=true; break; }       \
-            if (!lfound) requested_codes.push_back(co); } }
-
-        for(unsigned i=0; i<_fex.size(); i++) {
-          // cleanup
-          if (_pv_writer[i]) {
-            delete _pv_writer[i];
-            _pv_writer[i] = 0;
-          }
-          // configure
-          ::TimeTool::Fex& fex = *_fex[i];
-          fex.configure();
-	  for(unsigned k=0; k<fex.m_beam_logic.size(); k++)
-	    INSERT_CODE(fex.m_beam_logic[k].event_code());
-	  for(unsigned k=0; k<fex.m_laser_logic.size(); k++)
-	    INSERT_CODE(fex.m_laser_logic[k].event_code());
-//           if (fex._adjust_stats)
-//             _pv_writer[i] = new PVWriter(fex._adjust_pv.c_str());
-        }
-
-        if (requested_codes.size())
-          _app.post(new(&_occPool) EvrCommandRequest(requested_codes));
-
-        _adjust_n = 0;
-        _adjust_v = 0;
-      }
-      else if (tr->id()==TransitionId::Unconfigure) {
-        for(unsigned i=0; i<_fex.size(); i++) {
-          _fex[i]->unconfigure();
-          if (_pv_writer[i]) {
-            delete _pv_writer[i];
-            _pv_writer[i] = 0;
-          }
-        }
+      if (tr->id()==TransitionId::Unconfigure) {
+        for(unsigned i=0; i<_fex.size(); i++)
+	  delete _fex[i];
+	_fex  .clear();
+	_frame.clear();
       }
       return tr;
     }
     InDatagram* events(InDatagram* dg) {
       switch(dg->datagram().seq.service()) {
       case TransitionId::L1Accept:
-        { //  Add an encoder data object
+        {
           for(unsigned i=0; i<_fex.size(); i++)
             _frame[i] = 0;
           
@@ -301,7 +249,10 @@ namespace Pds {
           ndarray<Pds::EvrData::FIFOEvent,1> fifo = 
             make_ndarray<Pds::EvrData::FIFOEvent>(v[0]);
           for(unsigned i=0; i<v[0]; i++)
-            fifo[i] = Pds::EvrData::FIFOEvent(0,0,v[i+1]);
+            fifo[i] = Pds::EvrData::FIFOEvent(dg->seq.stamp().fiducials(),
+					      //dg->seq.stamp().ticks(),
+					      dg->seq.stamp().vector(),
+					      v[i+1]);
 
           for(unsigned i=0; i<_fex.size(); i++) {
             if (_frame[i]) {
@@ -367,48 +318,142 @@ namespace Pds {
               _frame[i] = reinterpret_cast<const Camera::FrameV1*>(xtc->payload());
           }
       }
-      else if (xtc->contains.id()==TypeId::Id_Opal1kConfig) {
-        for(unsigned i=0; i<_fex.size(); i++) {
-          ::TimeTool::Fex& fex = *_fex[i];
-          if (fex.m_get_key == xtc->src.phy()) {
-            InDatagram* dg = _dg;
-            //const Src& src = fex.src();
-            const Src& src = xtc->src;
-            _insert_pv(dg, src, 0, fex.base_name()+":AMPL");
-            _insert_pv(dg, src, 1, fex.base_name()+":FLTPOS");
-            _insert_pv(dg, src, 2, fex.base_name()+":FLTPOS_PS");
-            _insert_pv(dg, src, 3, fex.base_name()+":FLTPOSFWHM");
-            _insert_pv(dg, src, 4, fex.base_name()+":AMPLNXT");
-            _insert_pv(dg, src, 5, fex.base_name()+":REFAMPL");
+      else if (xtc->contains.id()==TypeId::Id_TimeToolConfig) {
+	Fex& fex = *new Fex(xtc->src,
+			    *reinterpret_cast<const TimeToolConfigType*>(xtc->payload()));
+	InDatagram* dg = _dg;
+	const Src& src = xtc->src;
+	_insert_pv(dg, src, 0, fex.base_name()+":AMPL");
+	_insert_pv(dg, src, 1, fex.base_name()+":FLTPOS");
+	_insert_pv(dg, src, 2, fex.base_name()+":FLTPOS_PS");
+	_insert_pv(dg, src, 3, fex.base_name()+":FLTPOSFWHM");
+	_insert_pv(dg, src, 4, fex.base_name()+":AMPLNXT");
+	_insert_pv(dg, src, 5, fex.base_name()+":REFAMPL");
 
-            if (fex.write_projections()) {
-              _insert_projection(dg, src, 6, fex.base_name()+":SIGNAL_WF");
-              _insert_projection(dg, src, 7, fex.base_name()+":SIDEBAND_WF");
-              _insert_projection(dg, src, 8, fex.base_name()+":REFERENCE_WF");
-            }
-          }
-        }
+	if (fex.write_projections()) {
+	  _insert_projection(dg, src, 6, fex.base_name()+":SIGNAL_WF");
+	  _insert_projection(dg, src, 7, fex.base_name()+":SIDEBAND_WF");
+	  _insert_projection(dg, src, 8, fex.base_name()+":REFERENCE_WF");
+	}
+	_fex  .push_back(&fex);
+	_frame.push_back(0);
       }
       return 1;
     }
   private:
-    Appliance&                          _app;
-    GenericPool                         _occPool;
     std::vector< ::TimeTool::Fex*     > _fex;
     std::vector<const Camera::FrameV1*> _frame;
-    std::vector<PVWriter*             > _pv_writer;
     std::vector<boost::shared_ptr<Pds::Xtc> > _pXtc;
-    unsigned  _adjust_n;
-    double    _adjust_v;
     InDatagram* _dg;
   };
 
+  class ConfigHandler : public XtcIterator {
+  public:
+    ConfigHandler(Appliance& app) : 
+      _app        (app),
+      _occPool    (sizeof(UserMessage),4),
+      _allocation (0),
+      _configure  (0) {}
+  public:
+    int process(Xtc* xtc) {
+      switch(xtc->contains.id()) {
+      case TypeId::Id_Xtc:
+	iterate(xtc);
+	break;
+      case TypeId::Id_Opal1kConfig:
+	_xtc.push_back(Xtc(TypeId(TypeId::Id_TimeToolConfig,1),
+			   xtc->src));
+			   
+	break;
+      default:
+	break;
+      }
+      return 1;
+    }
+  public:
+    void transitions(Transition* tr) {
+      switch (tr->id()) {
+      case TransitionId::Configure:
+	_configure = new Transition(tr->id(), 
+				    tr->phase(),
+				    tr->sequence(),
+				    tr->env());
+	break;
+      case TransitionId::Unconfigure:
+	delete _configure;
+	break;
+      case TransitionId::Map:
+	{ const Allocation& alloc = reinterpret_cast<const Allocate*>(tr)->allocation();
+	  _allocation = new Allocation(alloc);
+	} break;
+      case TransitionId::Unmap:
+	delete _allocation;
+	break;
+      default:
+	break;
+      }
+    }
+    void events(InDatagram* dg) {
+      if (dg->seq.service()!=TransitionId::Configure)
+	return;
 
+      _xtc.clear();
+      process(&dg->xtc);
+
+      if (_xtc.size()) {
+        std::vector<unsigned> requested_codes;
+	TimeToolConfigType tmplate(4,4,256,8,64);
+	for(unsigned i=0; i<_xtc.size(); i++) {
+	  TimeToolCfgCache cache(_xtc[i].src,
+				 _xtc[i].contains,
+				 tmplate._sizeof());
+	  cache.init(*_allocation);
+	  if (cache.fetch(_configure) > 0) {
+	    cache.record(dg);
+
+#define INSERT_CODE(c) {                                                \
+          if (c) {                                                      \
+            bool lfound=false;                                          \
+            unsigned co=abs(c);                                         \
+            for(unsigned i=0; i<requested_codes.size(); i++)            \
+              if (requested_codes[i]==co) { lfound=true; break; }       \
+            if (!lfound) requested_codes.push_back(co); } }
+
+	    const TimeToolConfigType& cfg = 
+	      *reinterpret_cast<const TimeToolConfigType*>(cache.current());
+	    for(unsigned k=0; k<cfg.beam_logic().size(); k++)
+	      INSERT_CODE(cfg.beam_logic()[k].event_code());
+	    for(unsigned k=0; k<cfg.laser_logic().size(); k++)
+	      INSERT_CODE(cfg.laser_logic()[k].event_code());
+
+	    Pds::TimeTool::dump(cfg);
+
+#undef INSERT_CODE
+	  }
+	}
+
+	if (requested_codes.size())
+	  _app.post(new(&_occPool) EvrCommandRequest(requested_codes));
+      }
+    }
+  private:
+    Appliance&    _app;
+    GenericPool   _occPool;
+    std::vector<Xtc>  _xtc;
+    const Allocation* _allocation;
+    const Transition* _configure;
+  };
 };
 
 
 Fex::Fex(const char* fname) :
   ::TimeTool::Fex(fname)
+{
+}
+
+Fex::Fex(const Src& src,
+	 const TimeToolConfigType& cfg) :
+  ::TimeTool::Fex(src,cfg)
 {
 }
 
@@ -429,8 +474,11 @@ static Semaphore _sem(Semaphore::FULL);
 void Fex::_monitor_raw_sig (const ndarray<const double,1>&) 
 {
   MapType::iterator it = _ref.find(_src);
-  if (it != _ref.end())
+  if (it != _ref.end()) {
+    if (m_ref.size()!=it->second.size())
+      m_ref = make_ndarray<double>(it->second.size());
     std::copy(it->second.begin(), it->second.end(), m_ref.begin());
+  }
 }
 
 void Fex::_monitor_ref_sig (const ndarray<const double,1>& ref) 
@@ -452,45 +500,59 @@ void Fex::_monitor_ref_sig (const ndarray<const double,1>& ref)
  
 
 static std::vector<Appliance*> _apps; 
-const std::vector<Appliance*> apps(Appliance& a)
+const std::vector<Appliance*> apps()
 {
   for(unsigned i=0; i<NWORK_THREADS; i++)
-    _apps.push_back(new FexApp("timetool.input",a));
+    _apps.push_back(new FexApp);
   return _apps;
 }
  
-TimeToolB::TimeToolB() :
-  WorkThreads("ttool", apps(*this)),
-  _evr (32)
+TimeToolC::TimeToolC() :
+  WorkThreads("ttool", apps()),
+  _evr       (32),
+  _config    (new ConfigHandler(*this))
 {
 }
 
-TimeToolB::~TimeToolB()
+TimeToolC::~TimeToolC()
 {
+  delete _config;
   for(unsigned i=0; i<_apps.size(); i++)
     delete _apps[i];
   _apps.clear();
 }
 
-InDatagram* TimeToolB::events(InDatagram* dg)
+Transition* TimeToolC::transitions(Transition* tr)
 {
-  if (dg->datagram().seq.service()==TransitionId::L1Accept) {
-    //
-    //  Encode the EVR FIFO onto the tail of this datagram
-    //
-    uint32_t b = (dg->datagram().seq.stamp().vector()&0x1f);
-    const Xtc& xtc = dg->datagram().xtc;
-    uint32_t* v = reinterpret_cast<uint32_t*>(xtc.payload()+xtc.sizeofPayload());
-    const std::vector<Pds::EvrData::FIFOEvent>& fifo = _evr[b];
-    v[0] = fifo.size();
-    for(unsigned i=0; i<fifo.size(); i++)
-      v[i+1] = fifo[i].eventCode();
-    _evr[b].clear();
+  _config->transitions(tr);
+  return WorkThreads::transitions(tr);
+}
+
+InDatagram* TimeToolC::events(InDatagram* dg)
+{
+  _config->events(dg);
+  switch (dg->datagram().seq.service()) {
+  case TransitionId::L1Accept: 
+    {
+      //
+      //  Encode the EVR FIFO onto the tail of this datagram
+      //
+      uint32_t b = (dg->datagram().seq.stamp().vector()&0x1f);
+      const Xtc& xtc = dg->datagram().xtc;
+      uint32_t* v = reinterpret_cast<uint32_t*>(xtc.payload()+xtc.sizeofPayload());
+      const std::vector<Pds::EvrData::FIFOEvent>& fifo = _evr[b];
+      v[0] = fifo.size();
+      for(unsigned i=0; i<fifo.size(); i++)
+	v[i+1] = fifo[i].eventCode();
+      _evr[b].clear();
+    } break;
+  default:
+    break;
   }
   return WorkThreads::events(dg);
 }
 
-Occurrence* TimeToolB::occurrences(Occurrence* occ) {
+Occurrence* TimeToolC::occurrences(Occurrence* occ) {
   if (occ->id() == OccurrenceId::EvrCommand) {
     const EvrCommand& cmd = *reinterpret_cast<const EvrCommand*>(occ);
     _evr[(cmd.seq.stamp().vector()&0x1f)].push_back(Pds::EvrData::FIFOEvent(0,0,cmd.code));
@@ -502,6 +564,6 @@ Occurrence* TimeToolB::occurrences(Occurrence* occ) {
 //  Plug-in module creator
 //
 
-extern "C" Appliance* create() { return new TimeToolB; }
+extern "C" Appliance* create() { return new TimeToolC; }
 
 extern "C" void destroy(Appliance* p) { delete p; }
