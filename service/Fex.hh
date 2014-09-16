@@ -31,6 +31,9 @@ namespace TimeTool {
     void analyze(const ndarray<const uint16_t,2>& frame,
                  const ndarray<const Pds::EvrData::FIFOEvent,1>& evr_fifo,
                  const Pds::Lusi::IpmFexV1* ipm);
+    void analyze(Pds::TimeTool::DataV1::EventType,
+		 const ndarray<const int,1>& signal,
+		 const ndarray<const int,1>& sideband);
   public:
     const string& base_name () const { return m_put_key; }	
     const Pds::Src&      src() const { return _src; }
@@ -85,6 +88,9 @@ namespace TimeTool {
     ndarray<double,1> m_weights; // digital filter weights
     ndarray<double,1> m_ref;     // accumulated reference
     ndarray<double,1> m_sb_avg;  // averaged sideband
+
+    ndarray<const int,1> m_sig;     // signal region projection
+    ndarray<const int,1> m_sb;      // sideband region projection
 
     unsigned m_pedestal;
 

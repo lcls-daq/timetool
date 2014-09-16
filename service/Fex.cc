@@ -42,7 +42,7 @@ Fex::Fex(const char* fname) :
 Fex::Fex(const Pds::Src& src,
 	 const Pds::TimeTool::ConfigV1& cfg)
 {
-  m_put_key = std::string((const char*)cfg.base_name().data(),
+  m_put_key = std::string(cfg.base_name(),
 			  cfg.base_name_length());
   _src = src;
   m_get_key = src.phy();
@@ -100,6 +100,8 @@ Fex::Fex(const Pds::Src& src,
     m_sig_roi_hi[0]-m_sig_roi_lo[0]+1;
 
   m_ref = load_reference(m_get_key,sz);
+  m_sig = ndarray<const int,1>();
+  m_sb  = ndarray<const int,1>();
 
   m_pedestal = 32;
 
@@ -294,6 +296,8 @@ void Fex::configure()
   _write_projections = svc.config("write_projections",false);
 
   m_ref = load_reference(m_get_key,sig_roi_x[1]-sig_roi_x[0]+1);
+  m_sig = ndarray<const int,1>();
+  m_sb  = ndarray<const int,1>();
 
   m_pedestal = 32;
 
@@ -401,44 +405,43 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   //  Project signal ROI
   //
   unsigned pdim = m_projectX ? 1:0;
-  ndarray<const int,1> sig = psalg::project(f,
-                                            m_sig_roi_lo,
-                                            m_sig_roi_hi,
-                                            m_pedestal, pdim);
+  m_sig = psalg::project(f,
+			 m_sig_roi_lo,
+			 m_sig_roi_hi,
+			 m_pedestal, pdim);
 
   //
   //  Calculate sideband correction
   //
-  ndarray<const int,1> sb;
   if (m_sb_roi_lo[0]!=m_sb_roi_hi[0])
-    sb = psalg::project(f,
-                        m_sb_roi_lo ,
-                        m_sb_roi_hi,
-                        m_pedestal, pdim);
-
-  ndarray<double,1> sigd = make_ndarray<double>(sig.shape()[0]);
+    m_sb = psalg::project(f,
+			  m_sb_roi_lo ,
+			  m_sb_roi_hi,
+			  m_pedestal, pdim);
+  
+  ndarray<double,1> sigd = make_ndarray<double>(m_sig.shape()[0]);
 
   //
   //  Correct projection for common mode found in sideband
   //
-  if (sb.size()) {
-    psalg::rolling_average(sb, m_sb_avg, m_sb_convergence);
+  if (m_sb.size()) {
+    psalg::rolling_average(m_sb, m_sb_avg, m_sb_convergence);
 
-    ndarray<const double,1> sbc = psalg::commonModeLROE(sb, m_sb_avg);
+    ndarray<const double,1> sbc = psalg::commonModeLROE(m_sb, m_sb_avg);
 
-    for(unsigned i=0; i<sig.shape()[0]; i++)
-      sigd[i] = double(sig[i])-sbc[i];
+    for(unsigned i=0; i<m_sig.shape()[0]; i++)
+      sigd[i] = double(m_sig[i])-sbc[i];
   }
   else {
-    for(unsigned i=0; i<sig.shape()[0]; i++)
-      sigd[i] = double(sig[i]);
+    for(unsigned i=0; i<m_sig.shape()[0]; i++)
+      sigd[i] = double(m_sig[i]);
   }
 
   //
   //  Require projection has a minimum amplitude (else no laser)
   //
   bool lcut=true;
-  for(unsigned i=0; i<sig.shape()[0]; i++)
+  for(unsigned i=0; i<sigd.shape()[0]; i++)
     if (sigd[i]>m_proj_cut)
       lcut=false;
 
@@ -462,7 +465,7 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   //
   //  Divide by the reference
   //
-  for(unsigned i=0; i<sig.shape()[0]; i++)
+  for(unsigned i=0; i<sigd.shape()[0]; i++)
     sigd[i] = sigd[i]/m_ref[i] - 1;
 
   _monitor_sub_sig( sigd );
@@ -509,6 +512,119 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   else
     _cut[NOFITS]++;
 }
+
+void Fex::analyze(Pds::TimeTool::DataV1::EventType etype,
+		  const ndarray<const int,1>& signal,
+		  const ndarray<const int,1>& sideband) 
+{
+  _cut[NCALLS]++;
+
+  bool nolaser   = (etype == Pds::TimeTool::DataV1::Dark);
+
+  bool nobeam    = (etype == Pds::TimeTool::DataV1::Reference);
+
+  if (nolaser) { _cut[NOLASER]++; return; }
+
+  if (!signal.size()) { _cut[FRAMESIZE]++; return; }
+
+  unsigned pdim = m_projectX ? 1:0;
+  m_sig = signal;
+  m_sb  = sideband;
+  
+  ndarray<double,1> sigd = make_ndarray<double>(m_sig.shape()[0]);
+
+  //
+  //  Correct projection for common mode found in sideband
+  //
+  if (m_sb.size()) {
+    psalg::rolling_average(m_sb, m_sb_avg, m_sb_convergence);
+
+    ndarray<const double,1> sbc = psalg::commonModeLROE(m_sb, m_sb_avg);
+
+    for(unsigned i=0; i<m_sig.shape()[0]; i++)
+      sigd[i] = double(m_sig[i])-sbc[i];
+  }
+  else {
+    for(unsigned i=0; i<m_sig.shape()[0]; i++)
+      sigd[i] = double(m_sig[i]);
+  }
+
+  //
+  //  Require projection has a minimum amplitude (else no laser)
+  //
+  bool lcut=true;
+  for(unsigned i=0; i<sigd.shape()[0]; i++)
+    if (sigd[i]>m_proj_cut)
+      lcut=false;
+
+  if (lcut) { _cut[PROJCUT]++; return; }
+
+  if (nobeam) {
+    _monitor_ref_sig( sigd );
+    psalg::rolling_average(ndarray<const double,1>(sigd),
+                           m_ref, m_ref_convergence);
+    _cut[NOBEAM]++;
+    return;
+  }
+
+  _monitor_raw_sig( sigd );
+
+  if (m_ref.size()==0) {
+    _cut[NOREF]++;
+    return;
+  }
+
+  //
+  //  Divide by the reference
+  //
+  for(unsigned i=0; i<sigd.shape()[0]; i++)
+    sigd[i] = sigd[i]/m_ref[i] - 1;
+
+  _monitor_sub_sig( sigd );
+
+  //
+  //  Apply the digital filter
+  //
+  ndarray<double,1> qwf = psalg::finite_impulse_response(m_weights,sigd);
+
+  _monitor_flt_sig( qwf );
+
+  //
+  //  Find the two highest peaks that are well-separated
+  //
+  const double afrac = 0.50;
+  std::list<unsigned> peaks =
+    psalg::find_peaks(qwf, afrac, 2);
+
+  unsigned nfits = peaks.size();
+  if (nfits>0) {
+    unsigned ix = *peaks.begin();
+    ndarray<double,1> pFit0 = psalg::parab_fit(qwf,ix,0.8);
+    if (pFit0[2]>0) {
+      double   xflt = pFit0[1]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+
+      double  xfltc = 0;
+      for(unsigned i=m_calib_poly.size(); i!=0; )
+        xfltc = xfltc*xflt + m_calib_poly[--i];
+
+      _amplitude = pFit0[0];
+      _flt_position  = xflt;
+      _flt_position_ps  = xfltc;
+      _flt_fwhm      = pFit0[2];
+      _ref_amplitude = m_ref[ix];
+
+      if (nfits>1) {
+        ndarray<double,1> pFit1 =
+          psalg::parab_fit(qwf,*(++peaks.begin()),0.8);
+        if (pFit1[2]>0)
+          _nxt_amplitude = pFit1[0];
+      }
+    }
+  }
+  else
+    _cut[NOFITS]++;
+}
+
 
 ndarray<double,1> load_reference(unsigned key, unsigned sz)
 {

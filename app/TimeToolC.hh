@@ -10,6 +10,8 @@
 namespace Pds {
   class ConfigHandler;
   class FexApp;
+  namespace TimeTool { class ConfigHandler; }
+
   class TimeToolC : public WorkThreads {
   public:
     TimeToolC();
@@ -20,7 +22,7 @@ namespace Pds {
     Occurrence* occurrences(Occurrence*);
   private:
     std::vector< std::vector<Pds::EvrData::FIFOEvent> > _evr;
-    ConfigHandler*          _config;
+    TimeTool::ConfigHandler*                            _config;
   };
 };
 
