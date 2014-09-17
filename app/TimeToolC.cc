@@ -1,4 +1,5 @@
 #include "TimeToolC.hh"
+#include "TimeToolEpics.hh"
 #include "ConfigHandler.hh"
 
 #include "pds/client/FrameTrim.hh"
@@ -9,6 +10,7 @@
 #include "pds/utility/Occurrence.hh"
 #include "pds/utility/OccurrenceId.hh"
 #include "pds/config/TimeToolConfigType.hh"
+#include "pds/config/TimeToolDataType.hh"
 
 #include "pdsdata/xtc/TypeId.hh"
 #include "pdsdata/xtc/Xtc.hh"
@@ -26,8 +28,9 @@
 
 #include "psalg/psalg.h"
 
-#include "pds/epicstools/PVWriter.hh"
 #include "timetool/service/Fex.hh"
+
+#include "cadef.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -44,7 +47,6 @@ typedef Pds::Opal1k::ConfigV1 Opal1kConfig;
 typedef Pds::EvrData::DataV3 EvrDataType;
 
 using namespace Pds;
-using Pds_Epics::PVWriter;
 
 static void copy_projection(ndarray<const int,1> in,
 			    ndarray<const int,1> out)
@@ -109,10 +111,10 @@ namespace Pds {
     void reset();
     const TimeToolConfigType& config() const 
     { return *reinterpret_cast<const TimeToolConfigType*>(_config_buffer); }
-    TimeTool::DataV1::EventType event_type() const { return _etype; }
+    TimeToolDataType::EventType event_type() const { return _etype; }
   private:
     char* _config_buffer;
-    TimeTool::DataV1::EventType   _etype;
+    TimeToolDataType::EventType   _etype;
   };
     
   //
@@ -125,13 +127,10 @@ namespace Pds {
   public:
     Transition* transitions(Transition* tr) {
       if (tr->id()==TransitionId::Unconfigure) {
-        for(unsigned i=0; i<_fex.size(); i++) {
+        for(unsigned i=0; i<_fex.size(); i++)
 	  delete _fex[i];
-	  delete _pvwri[i];
-	}
 	_fex  .clear();
 	_frame.clear();
-	_pvwri.clear();
       }
       return tr;
     }
@@ -174,17 +173,6 @@ namespace Pds {
 
               Damage dmg(fex.status() ? 0x4000 : 0);
 
-	      if (_pvwri[i]->connected()) {
-		double* v = reinterpret_cast<double*>(_pvwri[i]->data());
-		v[0] = fex.amplitude();
-		v[1] = fex.filtered_position();
-		v[2] = fex.filtered_pos_ps();
-		v[3] = fex.filtered_fwhm();
-		v[4] = fex.next_amplitude();
-		v[5] = fex.ref_amplitude();
-		_pvwri[i]->put(); 
-	      }
-
               //  Insert the results
               _insert_pv(dg, src, 0, fex.amplitude());
               _insert_pv(dg, src, 1, fex.filtered_position ());
@@ -193,8 +181,8 @@ namespace Pds {
               _insert_pv(dg, src, 4, fex.next_amplitude());
               _insert_pv(dg, src, 5, fex.ref_amplitude());
 
-	      { char* p = new char[TimeTool::DataV1::_sizeof(fex.config())];
-		TimeTool::DataV1& d = *new (p) TimeTool::DataV1(fex.event_type(),
+	      { char* p = new char[TimeToolDataType::_sizeof(fex.config())];
+		TimeToolDataType& d = *new (p) TimeToolDataType(fex.event_type(),
 								fex.amplitude(),
 								fex.filtered_position(),
 								fex.filtered_pos_ps(),
@@ -206,12 +194,10 @@ namespace Pds {
 		  copy_projection(fex.m_sb , d.projected_sideband(fex.config()));
 		}
 		Xtc xtc(TypeId(TypeId::Id_TimeToolData,1),src);
-		xtc.extent += TimeTool::DataV1::_sizeof(fex.config());
+		xtc.extent += TimeToolDataType::_sizeof(fex.config());
 		dg->insert(xtc, p);
 		delete[] p;
 	      }
-
-              break; 
             }
           }
 
@@ -254,14 +240,12 @@ namespace Pds {
 
 	_fex  .push_back(&fex);
 	_frame.push_back(0);
-	_pvwri.push_back(new PVWriter((fex.base_name()+":ARRAY").c_str()));
       }
       return 1;
     }
   private:
     std::vector<Fex*>                   _fex;
     std::vector<const Camera::FrameV1*> _frame;
-    std::vector<PVWriter*>              _pvwri;
     std::vector<boost::shared_ptr<Pds::Xtc> > _pXtc;
     InDatagram* _dg;
   };
@@ -284,7 +268,7 @@ Fex::~Fex()
 void Fex::reset()
 {
   ::TimeTool::Fex::reset(); 
-  _etype = TimeTool::DataV1::Dark;
+  _etype = TimeToolDataType::Dark;
 }
 
 typedef std::map<Pds::Src,ndarray<double,1> > MapType;
@@ -299,7 +283,7 @@ static Semaphore _sem(Semaphore::FULL);
 //
 void Fex::_monitor_raw_sig (const ndarray<const double,1>& a) 
 {
-  _etype = TimeTool::DataV1::Signal;
+  _etype = TimeToolDataType::Signal;
   MapType::iterator it = _ref.find(_src);
   if (it != _ref.end()) {
     if (m_ref.size()!=it->second.size())
@@ -310,7 +294,7 @@ void Fex::_monitor_raw_sig (const ndarray<const double,1>& a)
 
 void Fex::_monitor_ref_sig (const ndarray<const double,1>& ref) 
 {
-  _etype = TimeTool::DataV1::Reference; 
+  _etype = TimeToolDataType::Reference; 
   MapType::iterator it = _ref.find(_src);
   if (it == _ref.end()) {
     ndarray<double,1> a = make_ndarray<double>(ref.size());
@@ -340,6 +324,7 @@ TimeToolC::TimeToolC() :
   _evr       (32),
   _config    (new TimeTool::ConfigHandler(*this))
 {
+  (new TimeToolEpics)->connect(this);
 }
 
 TimeToolC::~TimeToolC()

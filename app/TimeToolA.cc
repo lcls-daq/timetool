@@ -80,54 +80,6 @@ static void _insert_pv(InDatagram* dg,
   delete[] p;
 }
 
-static void _insert_projection(InDatagram* dg,
-			       const Src&  src,
-			       int         id,
-			       const string& name)
-{
-  const int wf_size=1024;
-  unsigned sz = sizeof(Pds::Epics::EpicsPvCtrlLong)+wf_size*sizeof(unsigned);
-  sz = (sz+3)&~3;
-  char* p = new char[sz];
-
-  Pds::Epics::dbr_ctrl_long ctrl; memset(&ctrl, 0, sizeof(ctrl));
-  int data[wf_size];
-  memset(data,0,wf_size*sizeof(int));
-
-  new(p) Pds::Epics::EpicsPvCtrlLong(id,DBR_CTRL_LONG,wf_size,name.c_str(),ctrl,data);
-  
-  Xtc xtc(TypeId(TypeId::Id_Epics,1),src);
-  xtc.extent += sz;
-  dg->insert(xtc, p);
-  delete[] p;
-}
-
-static void _insert_projection(InDatagram* dg,
-			       const Src&  src,
-			       int         id,
-			       const uint32_t* val)
-{
-#define PvType Pds::Epics::EpicsPvTimeLong
-
-  const int wf_size=1024;
-
-  Xtc& xtc = dg->xtc;
-  unsigned extent = xtc.extent;
-
-  Xtc* tc = new (&xtc) Xtc(TypeId(TypeId::Id_Epics,1),src);
-  unsigned payload_size = sizeof(PvType)+sizeof(unsigned)*wf_size;
-  payload_size = (payload_size+3)&~3;
-  char* b = (char*)xtc.alloc(payload_size);
-
-  Pds::Epics::dbr_time_long v;
-  memset(&v, 0, sizeof(v));
-  new (b) PvType(id, DBR_TIME_LONG, wf_size, v, reinterpret_cast<const int32_t*>(val));
-
-  tc->extent = xtc.extent - extent;
-
-#undef PvType
-}
-
 namespace Pds {
 
   class FrameTrim {
@@ -301,14 +253,6 @@ namespace Pds {
               _insert_pv(dg, src, 4, fex.next_amplitude());
               _insert_pv(dg, src, 5, fex.ref_amplitude());
 
-              /*
-              if (fex.write_projections()) {
-                _insert_projection(dg, src, 6, fex.signal_wf   ());
-                _insert_projection(dg, src, 7, fex.sideband_wf ());
-                _insert_projection(dg, src, 8, fex.reference_wf());
-              }
-              */
-
               break; 
             }
           }
@@ -351,12 +295,6 @@ namespace Pds {
             _insert_pv(dg, src, 3, fex.base_name()+":FLTPOSFWHM");
             _insert_pv(dg, src, 4, fex.base_name()+":AMPLNXT");
             _insert_pv(dg, src, 5, fex.base_name()+":REFAMPL");
-
-            if (fex.write_projections()) {
-              _insert_projection(dg, src, 6, fex.base_name()+":SIGNAL_WF");
-              _insert_projection(dg, src, 7, fex.base_name()+":SIDEBAND_WF");
-              _insert_projection(dg, src, 8, fex.base_name()+":REFERENCE_WF");
-            }
           }
         }
       }
