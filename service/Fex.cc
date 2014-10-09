@@ -16,6 +16,8 @@
 
 //#define DBUG
 
+typedef Pds::TimeTool::ConfigV1  TimeToolConfigType;
+
 using Pds::DetInfo;
 using namespace TimeTool;
 
@@ -303,6 +305,46 @@ void Fex::configure()
 
   _cut.clear();
   _cut.resize(NCUTS,0);
+}
+
+const Pds::TimeTool::ConfigV1* Fex::config(const char* fname)
+{
+  Fex fex(fname);
+  fex.configure();
+  fex.m_put_key.reserve(fex.m_put_key.size()+1);
+  TimeToolConfigType tmplate(fex.m_beam_logic.size(),
+                             fex.m_laser_logic.size(),
+                             fex.m_weights.size(),
+                             fex.m_calib_poly.size(),
+                             fex.m_put_key.size());
+  char* p = new char[tmplate._sizeof()];
+  return new(p) TimeToolConfigType(fex.m_projectX ? TimeToolConfigType::X : TimeToolConfigType::Y,
+                                   fex._write_image,
+                                   fex._write_projections,
+                                   !(fex.m_sb_roi_lo[0]==0 &&
+                                     fex.m_sb_roi_hi[0]==0),
+                                   fex.m_weights.size(),
+                                   fex.m_calib_poly.size(),
+                                   fex.m_put_key.size(),
+                                   fex.m_beam_logic.size(),
+                                   fex.m_laser_logic.size(),
+                                   fex.m_proj_cut,
+                                   Pds::Camera::FrameCoord(fex.m_sig_roi_lo[1],
+                                                           fex.m_sig_roi_lo[0]),
+                                   Pds::Camera::FrameCoord(fex.m_sig_roi_hi[1],
+                                                           fex.m_sig_roi_hi[0]),
+                                   Pds::Camera::FrameCoord(fex.m_sb_roi_lo[1],
+                                                           fex.m_sb_roi_lo[0]),
+                                   Pds::Camera::FrameCoord(fex.m_sb_roi_hi[1],
+                                                           fex.m_sb_roi_hi[0]),
+                                   fex.m_sb_convergence,
+                                   fex.m_ref_convergence,
+                                   fex.m_beam_logic.data(),
+                                   fex.m_laser_logic.data(),
+                                   fex.m_weights.data(),
+                                   fex.m_calib_poly.data(),
+                                   fex.m_put_key.c_str());
+                                   
 }
 
 void Fex::reset() 

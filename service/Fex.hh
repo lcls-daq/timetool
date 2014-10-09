@@ -57,6 +57,8 @@ namespace TimeTool {
     virtual void _monitor_sub_sig (const ndarray<const double,1>&) {}
     virtual void _monitor_flt_sig (const ndarray<const double,1>&) {}
   public:
+    static const Pds::TimeTool::ConfigV1* config(const char* fname="timetool.input");
+  public:
     string   _fname;
 
     unsigned m_get_key;

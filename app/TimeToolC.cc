@@ -322,7 +322,7 @@ const std::vector<Appliance*> apps()
 TimeToolC::TimeToolC() :
   WorkThreads("ttool", apps()),
   _evr       (32),
-  _config    (new TimeTool::ConfigHandler(*this))
+  _config    (new ::TimeTool::ConfigHandler(*this))
 {
   (new TimeToolEpics)->connect(this);
 }

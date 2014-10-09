@@ -13,23 +13,23 @@ namespace Pds {
   class Appliance;
   class InDatagram;
   class Transition;
+};
 
-  namespace TimeTool {
-    class ConfigHandler : public XtcIterator {
-    public:
-      ConfigHandler(Appliance& app);
-    public:
-      int process(Xtc* xtc);
-    public:
-      void transitions(Transition* tr);
-      void events     (InDatagram* dg);
-    private:
-      Appliance&        _app;
-      GenericPool       _occPool;
-      std::vector<Xtc>  _xtc;
-      const Allocation* _allocation;
-      const Transition* _configure;
-    };
+namespace TimeTool {
+  class ConfigHandler : public Pds::XtcIterator {
+  public:
+    ConfigHandler(Pds::Appliance& app);
+  public:
+    int process(Pds::Xtc* xtc);
+  public:
+    void transitions(Pds::Transition* tr);
+    void events     (Pds::InDatagram* dg);
+  private:
+    Pds::Appliance&        _app;
+    Pds::GenericPool       _occPool;
+    std::vector<Pds::Xtc>  _xtc;
+    const Pds::Allocation* _allocation;
+    const Pds::Transition* _configure;
   };
 };
 

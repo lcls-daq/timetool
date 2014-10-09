@@ -7,10 +7,11 @@
 #include "pdsdata/psddl/evr.ddl.h"
 #include "ndarray/ndarray.h"
 
+namespace TimeTool { class ConfigHandler; }
+
 namespace Pds {
   class ConfigHandler;
   class FexApp;
-  namespace TimeTool { class ConfigHandler; }
 
   class TimeToolC : public WorkThreads {
   public:

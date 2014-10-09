@@ -1,4 +1,5 @@
 #include "timetool/app/ConfigHandler.hh"
+#include "timetool/service/Fex.hh"
 
 #include "pds/config/CfgCache.hh"
 #include "pds/config/TimeToolConfigType.hh"
@@ -18,9 +19,15 @@ namespace Pds {
   };
 };
 
-using namespace Pds;
+using Pds::Xtc;
+using Pds::TypeId;
+using Pds::Transition;
+using Pds::TransitionId;
+using Pds::Allocate;
+using Pds::Allocation;
+using ::TimeTool::ConfigHandler;
 
-TimeTool::ConfigHandler::ConfigHandler(Appliance& app) : 
+ConfigHandler::ConfigHandler(Pds::Appliance& app) : 
   _app        (app),
   _occPool    (sizeof(UserMessage),4),
   _allocation (0),
@@ -28,15 +35,14 @@ TimeTool::ConfigHandler::ConfigHandler(Appliance& app) :
 {
 }
 
-int TimeTool::ConfigHandler::process(Xtc* xtc) 
+int ConfigHandler::process(Xtc* xtc) 
 {
   switch(xtc->contains.id()) {
   case TypeId::Id_Xtc:
     iterate(xtc);
     break;
   case TypeId::Id_Opal1kConfig:
-    _xtc.push_back(Xtc(TypeId(TypeId::Id_TimeToolConfig,1),
-		       xtc->src));
+    _xtc.push_back(Xtc(_timetoolConfigType,xtc->src));
 			   
     break;
   default:
@@ -45,7 +51,7 @@ int TimeTool::ConfigHandler::process(Xtc* xtc)
   return 1;
 }
 
-void TimeTool::ConfigHandler::transitions(Transition* tr) 
+void ConfigHandler::transitions(Transition* tr) 
 {
   switch (tr->id()) {
   case TransitionId::Configure:
@@ -69,7 +75,26 @@ void TimeTool::ConfigHandler::transitions(Transition* tr)
   }
 }
 
-void TimeTool::ConfigHandler::events(InDatagram* dg) 
+static void _add_config(const TimeToolConfigType& cfg,
+                        std::vector<unsigned>& requested_codes) {
+#define INSERT_CODE(c) {                                        \
+    if (c) {                                                    \
+      bool lfound=false;                                        \
+      unsigned co=abs(c);                                       \
+      for(unsigned i=0; i<requested_codes.size(); i++)          \
+        if (requested_codes[i]==co) { lfound=true; break; }     \
+      if (!lfound) requested_codes.push_back(co); } }
+
+  for(unsigned k=0; k<cfg.beam_logic().size(); k++)
+    INSERT_CODE(cfg.beam_logic()[k].event_code());
+  for(unsigned k=0; k<cfg.laser_logic().size(); k++)
+    INSERT_CODE(cfg.laser_logic()[k].event_code());
+
+  Pds::TimeTool::dump(cfg);
+#undef INSERT_CODE
+}
+
+void ConfigHandler::events(InDatagram* dg) 
 {
   if (dg->seq.service()!=TransitionId::Configure)
     return;
@@ -87,25 +112,20 @@ void TimeTool::ConfigHandler::events(InDatagram* dg)
       cache.init(*_allocation);
       if (cache.fetch(_configure) > 0) {
 	cache.record(dg);
+        const TimeToolConfigType& cfg = 
+          *reinterpret_cast<const TimeToolConfigType*>(cache.current());
+        _add_config(cfg, requested_codes);
+      }
+    }
 
-#define INSERT_CODE(c) {                                                \
-          if (c) {                                                      \
-            bool lfound=false;                                          \
-            unsigned co=abs(c);                                         \
-            for(unsigned i=0; i<requested_codes.size(); i++)            \
-              if (requested_codes[i]==co) { lfound=true; break; }       \
-            if (!lfound) requested_codes.push_back(co); } }
-
-	const TimeToolConfigType& cfg = 
-	  *reinterpret_cast<const TimeToolConfigType*>(cache.current());
-	for(unsigned k=0; k<cfg.beam_logic().size(); k++)
-	  INSERT_CODE(cfg.beam_logic()[k].event_code());
-	for(unsigned k=0; k<cfg.laser_logic().size(); k++)
-	  INSERT_CODE(cfg.laser_logic()[k].event_code());
-
-	TimeTool::dump(cfg);
-
-#undef INSERT_CODE
+    if (!requested_codes.size()) {
+      const TimeToolConfigType* cfg = Fex::config();
+      if (cfg) {
+        Xtc xtc(_timetoolConfigType,_xtc[0].src);
+        xtc.alloc(cfg->_sizeof());
+        dg->insert(xtc,cfg);
+        _add_config(*cfg, requested_codes);
+        delete[] reinterpret_cast<const char*>(cfg);
       }
     }
 
