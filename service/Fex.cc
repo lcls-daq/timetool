@@ -44,8 +44,10 @@ Fex::Fex(const char* fname) :
 Fex::Fex(const Pds::Src& src,
 	 const Pds::TimeTool::ConfigV1& cfg)
 {
-  m_put_key = std::string(cfg.base_name(),
-			  cfg.base_name_length());
+  //  m_put_key = std::string(cfg.base_name(),
+  //			  cfg.base_name_length());
+  m_put_key = std::string(cfg.base_name());
+
   _src = src;
   m_get_key = src.phy();
 
