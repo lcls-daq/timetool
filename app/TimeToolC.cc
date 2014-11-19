@@ -190,8 +190,9 @@ namespace Pds {
 								fex.next_amplitude(),
 								fex.ref_amplitude());
 		if (fex.write_projections()) {
-		  copy_projection(fex.m_sig, d.projected_signal  (fex.config()));
-		  copy_projection(fex.m_sb , d.projected_sideband(fex.config()));
+		  copy_projection(fex.m_sig, d.projected_signal   (fex.config()));
+		  copy_projection(fex.m_sb , d.projected_sideband (fex.config()));
+		  copy_projection(fex.m_ref, d.projected_reference(fex.config()));
 		}
 		Xtc xtc(TypeId(TypeId::Id_TimeToolData,1),src);
 		xtc.extent += TimeToolDataType::_sizeof(fex.config());
@@ -286,9 +287,9 @@ void Fex::_monitor_raw_sig (const ndarray<const double,1>& a)
   _etype = TimeToolDataType::Signal;
   MapType::iterator it = _ref.find(_src);
   if (it != _ref.end()) {
-    if (m_ref.size()!=it->second.size())
-      m_ref = make_ndarray<double>(it->second.size());
-    std::copy(it->second.begin(), it->second.end(), m_ref.begin());
+    if (m_ref_avg.size()!=it->second.size())
+      m_ref_avg = make_ndarray<double>(it->second.size());
+    std::copy(it->second.begin(), it->second.end(), m_ref_avg.begin());
   }
 }
 

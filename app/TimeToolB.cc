@@ -315,7 +315,7 @@ void Fex::_monitor_raw_sig (const ndarray<const double,1>&)
 {
   MapType::iterator it = _ref.find(_src);
   if (it != _ref.end())
-    std::copy(it->second.begin(), it->second.end(), m_ref.begin());
+    std::copy(it->second.begin(), it->second.end(), m_ref_avg.begin());
 }
 
 void Fex::_monitor_ref_sig (const ndarray<const double,1>& ref) 

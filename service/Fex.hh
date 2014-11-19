@@ -22,6 +22,7 @@ namespace TimeTool {
   public:
     Fex(const char* fname="timetool.input");
     Fex(const Pds::Src&, const Pds::TimeTool::ConfigV1&);
+    Fex(const Pds::Src&, const Pds::TimeTool::ConfigV2&);
     virtual ~Fex();
   public:
     void init_plots();
@@ -31,9 +32,15 @@ namespace TimeTool {
     void analyze(const ndarray<const uint16_t,2>& frame,
                  const ndarray<const Pds::EvrData::FIFOEvent,1>& evr_fifo,
                  const Pds::Lusi::IpmFexV1* ipm);
-    void analyze(Pds::TimeTool::DataV1::EventType,
+
+    enum EventType { Dark, Reference, Signal };
+    void analyze(EventType,
 		 const ndarray<const int,1>& signal,
 		 const ndarray<const int,1>& sideband);
+    void analyze(EventType,
+		 const ndarray<const int,1>& signal,
+		 const ndarray<const int,1>& sideband,
+		 const ndarray<const int,1>& reference);
   public:
     const string& base_name () const { return m_put_key; }	
     const Pds::Src&      src() const { return _src; }
@@ -57,7 +64,7 @@ namespace TimeTool {
     virtual void _monitor_sub_sig (const ndarray<const double,1>&) {}
     virtual void _monitor_flt_sig (const ndarray<const double,1>&) {}
   public:
-    static const Pds::TimeTool::ConfigV1* config(const char* fname="timetool.input");
+    static const Pds::TimeTool::ConfigV2* config(const char* fname="timetool.input");
   public:
     string   _fname;
 
@@ -82,17 +89,24 @@ namespace TimeTool {
     unsigned m_sb_roi_lo[2];  // image sideband is projected within ROI
     unsigned m_sb_roi_hi[2];  // image sideband is projected within ROI
 
+    unsigned m_ref_roi_lo[2];  // image sideband is projected within ROI
+    unsigned m_ref_roi_hi[2];  // image sideband is projected within ROI
+
     unsigned m_frame_roi[2];  // frame data is an ROI
+
+    bool     m_use_sb_roi;
+    bool     m_use_ref_roi;
 
     double   m_sb_convergence ; // rolling average fraction (1/N)
     double   m_ref_convergence; // rolling average fraction (1/N)
 
     ndarray<double,1> m_weights; // digital filter weights
-    ndarray<double,1> m_ref;     // accumulated reference
+    ndarray<double,1> m_ref_avg; // accumulated reference
     ndarray<double,1> m_sb_avg;  // averaged sideband
 
     ndarray<const int,1> m_sig;     // signal region projection
     ndarray<const int,1> m_sb;      // sideband region projection
+    ndarray<const int,1> m_ref;     // reference region projection
 
     unsigned m_pedestal;
 

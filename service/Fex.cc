@@ -16,7 +16,7 @@
 
 //#define DBUG
 
-typedef Pds::TimeTool::ConfigV1  TimeToolConfigType;
+typedef Pds::TimeTool::ConfigV2  TimeToolConfigType;
 
 using Pds::DetInfo;
 using namespace TimeTool;
@@ -77,6 +77,7 @@ Fex::Fex(const Pds::Src& src,
   m_sig_roi_hi[1] = cfg.sig_roi_hi().column();
 
   if (cfg.subtract_sideband()) {
+    m_use_sb_roi = true;
     m_sb_roi_lo[0] = cfg.sb_roi_lo().row();
     m_sb_roi_lo[1] = cfg.sb_roi_lo().column();
     
@@ -84,8 +85,101 @@ Fex::Fex(const Pds::Src& src,
     m_sb_roi_hi[1] = cfg.sb_roi_hi().column();
   }
   else {
+    m_use_sb_roi = false;
     m_sb_roi_lo[0] = m_sb_roi_hi[0] = 0;
     m_sb_roi_lo[1] = m_sb_roi_hi[1] = 0;
+  }
+
+  m_ref_roi_lo[0] = m_ref_roi_hi[0] = 0;
+  m_ref_roi_lo[1] = m_ref_roi_hi[1] = 0;
+
+  m_sb_convergence  = cfg.sb_convergence();
+  m_ref_convergence = cfg.ref_convergence();
+
+  m_weights = make_ndarray<double>(cfg.number_of_weights());
+  std::copy(cfg.weights().begin(), cfg.weights().end(), m_weights.data());
+
+  _indicator_offset = -cfg.number_of_weights()/2;
+
+  _write_image = cfg.write_image();
+  _write_projections = cfg.write_projections();
+
+  unsigned sz = m_projectX ?
+    m_sig_roi_hi[1]-m_sig_roi_lo[1]+1 :
+    m_sig_roi_hi[0]-m_sig_roi_lo[0]+1;
+
+  m_ref_avg = load_reference(m_get_key,sz);
+  m_sig  = ndarray<const int,1>();
+  m_sb   = ndarray<const int,1>();
+  m_ref  = ndarray<const int,1>();
+
+  m_pedestal = 32;
+
+  _cut.clear();
+  _cut.resize(NCUTS,0);
+}
+
+Fex::Fex(const Pds::Src& src,
+	 const Pds::TimeTool::ConfigV2& cfg)
+{
+  //  m_put_key = std::string(cfg.base_name(),
+  //			  cfg.base_name_length());
+  m_put_key = std::string(cfg.base_name());
+
+  _src = src;
+  m_get_key = src.phy();
+
+  m_beam_logic = make_ndarray<Pds::TimeTool::EventLogic>(cfg.beam_logic().size());
+  std::copy(cfg.beam_logic().begin(),
+	    cfg.beam_logic().end(),
+	    m_beam_logic.begin());
+
+  m_laser_logic = make_ndarray<Pds::TimeTool::EventLogic>(cfg.laser_logic().size());
+  std::copy(cfg.laser_logic().begin(),
+	    cfg.laser_logic().end(),
+	    m_laser_logic.begin());
+
+  m_calib_poly.resize(cfg.calib_poly_dim());
+  std::copy(cfg.calib_poly().begin(),cfg.calib_poly().end(),m_calib_poly.data());
+
+  m_projectX = (cfg.project_axis() == TimeToolConfigType::X);
+
+  m_proj_cut = cfg.signal_cut();
+
+  m_frame_roi[0] = m_frame_roi[1] = 0;
+
+  m_sig_roi_lo[0] = cfg.sig_roi_lo().row();
+  m_sig_roi_lo[1] = cfg.sig_roi_lo().column();
+
+  m_sig_roi_hi[0] = cfg.sig_roi_hi().row();
+  m_sig_roi_hi[1] = cfg.sig_roi_hi().column();
+
+  if (cfg.subtract_sideband()) {
+    m_use_sb_roi = true;
+    m_sb_roi_lo[0] = cfg.sb_roi_lo().row();
+    m_sb_roi_lo[1] = cfg.sb_roi_lo().column();
+    
+    m_sb_roi_hi[0] = cfg.sb_roi_hi().row();
+    m_sb_roi_hi[1] = cfg.sb_roi_hi().column();
+  }
+  else {
+    m_use_sb_roi = false;
+    m_sb_roi_lo[0] = m_sb_roi_hi[0] = 0;
+    m_sb_roi_lo[1] = m_sb_roi_hi[1] = 0;
+  }
+
+  if (cfg.use_reference_roi()) {
+    m_use_ref_roi = true;
+    m_ref_roi_lo[0] = cfg.ref_roi_lo().row();
+    m_ref_roi_lo[1] = cfg.ref_roi_lo().column();
+    
+    m_ref_roi_hi[0] = cfg.ref_roi_hi().row();
+    m_ref_roi_hi[1] = cfg.ref_roi_hi().column();
+  }
+  else {
+    m_use_ref_roi = false;
+    m_ref_roi_lo[0] = m_ref_roi_hi[0] = 0;
+    m_ref_roi_lo[1] = m_ref_roi_hi[1] = 0;
   }
 
   m_sb_convergence  = cfg.sb_convergence();
@@ -103,9 +197,10 @@ Fex::Fex(const Pds::Src& src,
     m_sig_roi_hi[1]-m_sig_roi_lo[1]+1 :
     m_sig_roi_hi[0]-m_sig_roi_lo[0]+1;
 
-  m_ref = load_reference(m_get_key,sz);
+  m_ref_avg = load_reference(m_get_key,sz);
   m_sig = ndarray<const int,1>();
   m_sb  = ndarray<const int,1>();
+  m_ref = ndarray<const int,1>();
 
   m_pedestal = 32;
 
@@ -120,7 +215,7 @@ Fex::~Fex()
 
 void Fex::init_plots()
 {
-  _monitor_ref_sig( m_ref );
+  _monitor_ref_sig( m_ref_avg );
 }
 
 void Fex::unconfigure()
@@ -131,8 +226,8 @@ void Fex::unconfigure()
   sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
   FILE* f = fopen(buff,"w");
   if (f) {
-    for(unsigned i=0; i<m_ref.size(); i++)
-      fprintf(f," %f",m_ref[i]);
+    for(unsigned i=0; i<m_ref_avg.size(); i++)
+      fprintf(f," %f",m_ref_avg[i]);
     fprintf(f,"\n");
     fclose(f);
   }
@@ -268,15 +363,21 @@ void Fex::configure()
         throw std::string("TimeTool: Signal and sideband roi x range sizes differ.");
       }
     }
+    m_use_sb_roi = true;
     m_sb_roi_lo[0] = sb_roi_y[0];
     m_sb_roi_hi[0] = sb_roi_y[1];
     m_sb_roi_lo[1] = sb_roi_x[0];
     m_sb_roi_hi[1] = sb_roi_x[1];
   }
   else {
+    m_use_sb_roi = false;
     m_sb_roi_lo[0] = m_sb_roi_hi[0] = 0;
     m_sb_roi_lo[1] = m_sb_roi_hi[1] = 0;
   }
+
+  m_use_ref_roi = false;
+  m_ref_roi_lo[0] = m_ref_roi_hi[0] = 0;
+  m_ref_roi_lo[1] = m_ref_roi_hi[1] = 0;
 
   m_sig_roi_lo[0] = sig_roi_y[0];
   m_sig_roi_hi[0] = sig_roi_y[1];
@@ -299,7 +400,7 @@ void Fex::configure()
   _write_image       = svc.config("write_image",true);
   _write_projections = svc.config("write_projections",false);
 
-  m_ref = load_reference(m_get_key,sig_roi_x[1]-sig_roi_x[0]+1);
+  m_ref_avg = load_reference(m_get_key,sig_roi_x[1]-sig_roi_x[0]+1);
   m_sig = ndarray<const int,1>();
   m_sb  = ndarray<const int,1>();
 
@@ -309,7 +410,7 @@ void Fex::configure()
   _cut.resize(NCUTS,0);
 }
 
-const Pds::TimeTool::ConfigV1* Fex::config(const char* fname)
+const TimeToolConfigType* Fex::config(const char* fname)
 {
   Fex fex(fname);
   fex.configure();
@@ -323,8 +424,8 @@ const Pds::TimeTool::ConfigV1* Fex::config(const char* fname)
   return new(p) TimeToolConfigType(fex.m_projectX ? TimeToolConfigType::X : TimeToolConfigType::Y,
                                    fex._write_image,
                                    fex._write_projections,
-                                   !(fex.m_sb_roi_lo[0]==0 &&
-                                     fex.m_sb_roi_hi[0]==0),
+                                   fex.m_use_sb_roi,
+                                   fex.m_use_ref_roi,
                                    fex.m_weights.size(),
                                    fex.m_calib_poly.size(),
                                    fex.m_put_key.size(),
@@ -340,6 +441,10 @@ const Pds::TimeTool::ConfigV1* Fex::config(const char* fname)
                                    Pds::Camera::FrameCoord(fex.m_sb_roi_hi[1],
                                                            fex.m_sb_roi_hi[0]),
                                    fex.m_sb_convergence,
+                                   Pds::Camera::FrameCoord(fex.m_ref_roi_lo[1],
+                                                           fex.m_ref_roi_lo[0]),
+                                   Pds::Camera::FrameCoord(fex.m_ref_roi_hi[1],
+                                                           fex.m_ref_roi_hi[0]),
                                    fex.m_ref_convergence,
                                    fex.m_beam_logic.data(),
                                    fex.m_laser_logic.data(),
@@ -441,6 +546,16 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
       }
       m_sb_roi_hi[i] = f.shape()[i]-1;
     }
+    if (m_ref_roi_hi[i] >= f.shape()[i]) {
+      if (m_projectX == (i==0)) {
+        std::stringstream s;
+        s << "Timetool: reference " << (i==0 ? 'Y':'X') << " upper bound ["
+          << m_ref_roi_hi[i] << "] exceeds frame bounds ["
+          << f.shape()[i] << "].";
+        msg += s.str();
+      }
+      m_ref_roi_hi[i] = f.shape()[i]-1;
+    }
   }
   if (!msg.empty())
     throw msg;
@@ -457,13 +572,23 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   //
   //  Calculate sideband correction
   //
-  if (m_sb_roi_lo[0]!=m_sb_roi_hi[0])
+  if (m_use_sb_roi)
     m_sb = psalg::project(f,
 			  m_sb_roi_lo ,
 			  m_sb_roi_hi,
 			  m_pedestal, pdim);
   
+  //
+  //  Calculate reference correction
+  //
+  if (m_use_ref_roi)
+    m_ref = psalg::project(f,
+			   m_ref_roi_lo ,
+			   m_ref_roi_hi,
+			   m_pedestal, pdim);
+  
   ndarray<double,1> sigd = make_ndarray<double>(m_sig.shape()[0]);
+  ndarray<double,1> refd = make_ndarray<double>(m_sig.shape()[0]);
 
   //
   //  Correct projection for common mode found in sideband
@@ -473,12 +598,24 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
 
     ndarray<const double,1> sbc = psalg::commonModeLROE(m_sb, m_sb_avg);
 
-    for(unsigned i=0; i<m_sig.shape()[0]; i++)
-      sigd[i] = double(m_sig[i])-sbc[i];
+    if (m_use_ref_roi)
+      for(unsigned i=0; i<m_sig.shape()[0]; i++) {
+	sigd[i] = double(m_sig[i])-sbc[i];
+	refd[i] = double(m_ref[i])-sbc[i];
+      }
+    else
+      for(unsigned i=0; i<m_sig.shape()[0]; i++)
+	sigd[i] = double(m_sig[i])-sbc[i];
   }
   else {
-    for(unsigned i=0; i<m_sig.shape()[0]; i++)
-      sigd[i] = double(m_sig[i]);
+    if (m_use_ref_roi)
+      for(unsigned i=0; i<m_sig.shape()[0]; i++) {
+	sigd[i] = double(m_sig[i]);
+	refd[i] = double(m_ref[i]);
+      }
+    else
+      for(unsigned i=0; i<m_sig.shape()[0]; i++)
+	sigd[i] = double(m_sig[i]);
   }
 
   //
@@ -492,16 +629,21 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   if (lcut) { _cut[PROJCUT]++; return; }
 
   if (nobeam) {
-    _monitor_ref_sig( sigd );
-    psalg::rolling_average(ndarray<const double,1>(sigd),
-                           m_ref, m_ref_convergence);
+    _monitor_ref_sig( m_use_ref_roi ? refd:sigd );
+    psalg::rolling_average(ndarray<const double,1>(m_use_ref_roi ? refd:sigd),
+                           m_ref_avg, m_ref_convergence);
     _cut[NOBEAM]++;
     return;
+  }
+  else if (m_use_ref_roi) {
+    _monitor_ref_sig( refd );
+    psalg::rolling_average(ndarray<const double,1>(refd),
+                           m_ref_avg, m_ref_convergence);
   }
 
   _monitor_raw_sig( sigd );
 
-  if (m_ref.size()==0) {
+  if (m_ref_avg.size()==0) {
     _cut[NOREF]++;
     return;
   }
@@ -510,7 +652,7 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   //  Divide by the reference
   //
   for(unsigned i=0; i<sigd.shape()[0]; i++)
-    sigd[i] = sigd[i]/m_ref[i] - 1;
+    sigd[i] = sigd[i]/m_ref_avg[i] - 1;
 
   _monitor_sub_sig( sigd );
 
@@ -543,7 +685,7 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
       _flt_position  = xflt;
       _flt_position_ps  = xfltc;
       _flt_fwhm      = pFit0[2];
-      _ref_amplitude = m_ref[ix];
+      _ref_amplitude = m_ref_avg[ix];
 
       if (nfits>1) {
         ndarray<double,1> pFit1 =
@@ -557,15 +699,15 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
     _cut[NOFITS]++;
 }
 
-void Fex::analyze(Pds::TimeTool::DataV1::EventType etype,
+void Fex::analyze(EventType etype,
 		  const ndarray<const int,1>& signal,
 		  const ndarray<const int,1>& sideband) 
 {
   _cut[NCALLS]++;
 
-  bool nolaser   = (etype == Pds::TimeTool::DataV1::Dark);
+  bool nolaser   = (etype == Dark);
 
-  bool nobeam    = (etype == Pds::TimeTool::DataV1::Reference);
+  bool nobeam    = (etype == Reference);
 
   if (nolaser) { _cut[NOLASER]++; return; }
 
@@ -606,14 +748,14 @@ void Fex::analyze(Pds::TimeTool::DataV1::EventType etype,
   if (nobeam) {
     _monitor_ref_sig( sigd );
     psalg::rolling_average(ndarray<const double,1>(sigd),
-                           m_ref, m_ref_convergence);
+                           m_ref_avg, m_ref_convergence);
     _cut[NOBEAM]++;
     return;
   }
 
   _monitor_raw_sig( sigd );
 
-  if (m_ref.size()==0) {
+  if (m_ref_avg.size()==0) {
     _cut[NOREF]++;
     return;
   }
@@ -622,7 +764,7 @@ void Fex::analyze(Pds::TimeTool::DataV1::EventType etype,
   //  Divide by the reference
   //
   for(unsigned i=0; i<sigd.shape()[0]; i++)
-    sigd[i] = sigd[i]/m_ref[i] - 1;
+    sigd[i] = sigd[i]/m_ref_avg[i] - 1;
 
   _monitor_sub_sig( sigd );
 
@@ -655,7 +797,127 @@ void Fex::analyze(Pds::TimeTool::DataV1::EventType etype,
       _flt_position  = xflt;
       _flt_position_ps  = xfltc;
       _flt_fwhm      = pFit0[2];
-      _ref_amplitude = m_ref[ix];
+      _ref_amplitude = m_ref_avg[ix];
+
+      if (nfits>1) {
+        ndarray<double,1> pFit1 =
+          psalg::parab_fit(qwf,*(++peaks.begin()),0.8);
+        if (pFit1[2]>0)
+          _nxt_amplitude = pFit1[0];
+      }
+    }
+  }
+  else
+    _cut[NOFITS]++;
+}
+
+
+void Fex::analyze(EventType etype,
+		  const ndarray<const int,1>& signal,
+		  const ndarray<const int,1>& sideband, 
+		  const ndarray<const int,1>& reference) 
+{
+  _cut[NCALLS]++;
+
+  bool nolaser   = (etype == Dark);
+
+  bool nobeam    = (etype == Reference);
+
+  if (nolaser) { _cut[NOLASER]++; return; }
+
+  if (!signal.size()) { _cut[FRAMESIZE]++; return; }
+
+  unsigned pdim = m_projectX ? 1:0;
+  m_sig = signal;
+  m_sb  = sideband;
+  m_ref = reference;
+
+  ndarray<double,1> sigd = make_ndarray<double>(m_sig.shape()[0]);
+  ndarray<double,1> refd = make_ndarray<double>(m_sig.shape()[0]);
+
+  //
+  //  Correct projection for common mode found in sideband
+  //
+  if (m_sb.size()) {
+    psalg::rolling_average(m_sb, m_sb_avg, m_sb_convergence);
+
+    ndarray<const double,1> sbc = psalg::commonModeLROE(m_sb, m_sb_avg);
+
+    for(unsigned i=0; i<m_sig.shape()[0]; i++) {
+      sigd[i] = double(m_sig[i])-sbc[i];
+      refd[i] = double(m_ref[i])-sbc[i];
+    }
+  }
+  else {
+    for(unsigned i=0; i<m_sig.shape()[0]; i++) {
+      sigd[i] = double(m_sig[i]);
+      refd[i] = double(m_sig[i]);
+    }
+  }
+
+  //
+  //  Require projection has a minimum amplitude (else no laser)
+  //
+  bool lcut=true;
+  for(unsigned i=0; i<sigd.shape()[0]; i++)
+    if (sigd[i]>m_proj_cut)
+      lcut=false;
+
+  if (lcut) { _cut[PROJCUT]++; return; }
+
+  if (nobeam) {
+    _monitor_ref_sig( refd );
+    psalg::rolling_average(ndarray<const double,1>(refd),
+                           m_ref_avg, m_ref_convergence);
+    _cut[NOBEAM]++;
+    return;
+  }
+
+  _monitor_raw_sig( sigd );
+
+  if (m_ref_avg.size()==0) {
+    _cut[NOREF]++;
+    return;
+  }
+
+  //
+  //  Divide by the reference
+  //
+  for(unsigned i=0; i<sigd.shape()[0]; i++)
+    sigd[i] = sigd[i]/m_ref_avg[i] - 1;
+
+  _monitor_sub_sig( sigd );
+
+  //
+  //  Apply the digital filter
+  //
+  ndarray<double,1> qwf = psalg::finite_impulse_response(m_weights,sigd);
+
+  _monitor_flt_sig( qwf );
+
+  //
+  //  Find the two highest peaks that are well-separated
+  //
+  const double afrac = 0.50;
+  std::list<unsigned> peaks =
+    psalg::find_peaks(qwf, afrac, 2);
+
+  unsigned nfits = peaks.size();
+  if (nfits>0) {
+    unsigned ix = *peaks.begin();
+    ndarray<double,1> pFit0 = psalg::parab_fit(qwf,ix,0.8);
+    if (pFit0[2]>0) {
+      double   xflt = pFit0[1]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+
+      double  xfltc = 0;
+      for(unsigned i=m_calib_poly.size(); i!=0; )
+        xfltc = xfltc*xflt + m_calib_poly[--i];
+
+      _amplitude = pFit0[0];
+      _flt_position  = xflt;
+      _flt_position_ps  = xfltc;
+      _flt_fwhm      = pFit0[2];
+      _ref_amplitude = m_ref_avg[ix];
 
       if (nfits>1) {
         ndarray<double,1> pFit1 =
@@ -673,7 +935,7 @@ void Fex::analyze(Pds::TimeTool::DataV1::EventType etype,
 ndarray<double,1> load_reference(unsigned key, unsigned sz)
 {
   char buff[128];
-  ndarray<double,1> m_ref;
+  ndarray<double,1> m_ref_avg;
 
   // Load reference
   { const char* dir = getenv("HOME");
@@ -685,9 +947,9 @@ ndarray<double,1> load_reference(unsigned key, unsigned sz)
       while( fscanf(rf,"%f",&rv)>0 )
         r.push_back(rv);
       if (r.size()==sz) {
-        m_ref = make_ndarray<double>(r.size());
+        m_ref_avg = make_ndarray<double>(r.size());
         for(unsigned i=0; i<r.size(); i++)
-          m_ref[i] = r[i];
+          m_ref_avg[i] = r[i];
       }
       else {
         printf("Reference in %s size %zu does not match [%u]\n",
@@ -696,5 +958,5 @@ ndarray<double,1> load_reference(unsigned key, unsigned sz)
       fclose(rf);
     }
   }
-  return m_ref;
+  return m_ref_avg;
 }
