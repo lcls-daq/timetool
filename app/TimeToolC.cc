@@ -162,6 +162,7 @@ namespace Pds {
               Fex& fex = *_fex[i];
               fex.reset();
               
+              fex.m_pedestal = _frame[i]->offset();
               fex.analyze(_frame[i]->data16(), fifo, 0);
                           
               // assumes only one fex per event
