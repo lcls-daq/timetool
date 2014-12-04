@@ -283,10 +283,10 @@ void Fex::configure()
 				Pds::TimeTool::EventLogic::L_AND); }
 
   m_laser_logic = make_ndarray<Pds::TimeTool::EventLogic>(1);
-  { int code = svc.config("event_code_no_laser", 162);
+  { int code = svc.config("event_code_no_laser", 0);
     m_laser_logic[0] = 
       Pds::TimeTool::EventLogic(abs(code),
-				code>0 ?
+				code>=0 ?
 				Pds::TimeTool::EventLogic::L_AND_NOT :
 				Pds::TimeTool::EventLogic::L_AND); }
 
