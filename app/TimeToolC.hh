@@ -4,6 +4,7 @@
 #include "pds/client/WorkThreads.hh"
 
 #include "pds/utility/Transition.hh"
+#include "pds/service/GenericPool.hh"
 #include "pdsdata/psddl/evr.ddl.h"
 #include "ndarray/ndarray.h"
 
@@ -24,6 +25,7 @@ namespace Pds {
   private:
     std::vector< std::vector<Pds::EvrData::FIFOEvent> > _evr;
     TimeTool::ConfigHandler*                            _config;
+    Pds::GenericPool                                    _pool;
   };
 };
 

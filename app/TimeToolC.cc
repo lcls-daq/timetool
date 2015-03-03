@@ -324,7 +324,8 @@ const std::vector<Appliance*> apps()
 TimeToolC::TimeToolC() :
   WorkThreads("ttool", apps()),
   _evr       (32),
-  _config    (new ::TimeTool::ConfigHandler(*this))
+  _config    (new ::TimeTool::ConfigHandler(*this)),
+  _pool      (sizeof(UserMessage),2)
 {
   (new TimeToolEpics)->connect(this);
 }
@@ -345,7 +346,14 @@ Transition* TimeToolC::transitions(Transition* tr)
 
 InDatagram* TimeToolC::events(InDatagram* dg)
 {
-  _config->events(dg);
+  try {
+    _config->events(dg);
+  } catch (std::string& e) {
+    post(new(&_pool) UserMessage(e.c_str()));
+    dg->datagram().xtc.damage.increase(Damage::UserDefined);
+    return dg;
+  }
+
   switch (dg->datagram().seq.service()) {
   case TransitionId::L1Accept: 
     {
