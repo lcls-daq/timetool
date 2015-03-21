@@ -360,7 +360,7 @@ InDatagram* TimeToolC::events(InDatagram* dg)
       //
       //  Encode the EVR FIFO onto the tail of this datagram
       //
-      uint32_t b = (dg->datagram().seq.stamp().vector()&0x1f);
+      uint32_t b = (dg->datagram().seq.stamp().fiducials()&0x1f);
       const Xtc& xtc = dg->datagram().xtc;
       uint32_t* v = reinterpret_cast<uint32_t*>(xtc.payload()+xtc.sizeofPayload());
       const std::vector<Pds::EvrData::FIFOEvent>& fifo = _evr[b];
@@ -378,7 +378,7 @@ InDatagram* TimeToolC::events(InDatagram* dg)
 Occurrence* TimeToolC::occurrences(Occurrence* occ) {
   if (occ->id() == OccurrenceId::EvrCommand) {
     const EvrCommand& cmd = *reinterpret_cast<const EvrCommand*>(occ);
-    _evr[(cmd.seq.stamp().vector()&0x1f)].push_back(Pds::EvrData::FIFOEvent(0,0,cmd.code));
+    _evr[(cmd.seq.stamp().fiducials()&0x1f)].push_back(Pds::EvrData::FIFOEvent(0,0,cmd.code));
   }
   return occ;
 }

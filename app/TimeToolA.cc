@@ -366,7 +366,7 @@ Transition* TimeToolA::transitions(Transition* tr)
 InDatagram* TimeToolA::events(InDatagram* dg)
 {
   if (dg->datagram().seq.service()==TransitionId::L1Accept) {
-    uint32_t b = (dg->datagram().seq.stamp().vector()&0x1f);
+    uint32_t b = (dg->datagram().seq.stamp().fiducials()&0x1f);
     _task->call(new QueuedFex(dg, this, _fex, _evr[b]));
     _evr[b].clear();
   }
@@ -380,7 +380,7 @@ InDatagram* TimeToolA::events(InDatagram* dg)
 Occurrence* TimeToolA::occurrences(Occurrence* occ) {
   if (occ->id() == OccurrenceId::EvrCommand) {
     const EvrCommand& cmd = *reinterpret_cast<const EvrCommand*>(occ);
-    _evr[(cmd.seq.stamp().vector()&0x1f)].push_back(Pds::EvrData::FIFOEvent(0,0,cmd.code));
+    _evr[(cmd.seq.stamp().fiducials()&0x1f)].push_back(Pds::EvrData::FIFOEvent(0,0,cmd.code));
   }
   return occ;
 }

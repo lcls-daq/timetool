@@ -34,7 +34,6 @@ static const char* cuts[] = {"NCalls",
 
 static ndarray<double,1> load_reference(unsigned key, unsigned sz);
 
-//#define DBUG
 
 Fex::Fex(const char* fname) :
   _fname(fname+strspn(fname," \t"))
@@ -709,6 +708,11 @@ void Fex::analyze(EventType etype,
 
   bool nobeam    = (etype == Reference);
 
+#ifdef DBUG
+  printf("beam %c  laser %c\n", 
+	 nobeam ? 'F':'T', nolaser ? 'F':'T');
+#endif
+
   if (nolaser) { _cut[NOLASER]++; return; }
 
   if (!signal.size()) { _cut[FRAMESIZE]++; return; }
@@ -822,6 +826,11 @@ void Fex::analyze(EventType etype,
   bool nolaser   = (etype == Dark);
 
   bool nobeam    = (etype == Reference);
+
+#ifdef DBUG
+  printf("beam %c  laser %c\n", 
+	 nobeam ? 'F':'T', nolaser ? 'F':'T');
+#endif
 
   if (nolaser) { _cut[NOLASER]++; return; }
 
