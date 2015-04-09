@@ -243,6 +243,8 @@ void Fex::unconfigure()
 
 void Fex::configure()
 {
+  std::string s_exc;
+
   char buff[128];
   if (_fname[0]=='/')
     strcpy(buff,_fname.c_str());
@@ -348,7 +350,7 @@ void Fex::configure()
         printf("TimeTool: Signal and sideband roi x ranges differ.  Setting sideband roi to signal.\n");
       }
       if ((sb_roi_y[1]-sb_roi_y[0]) != (sig_roi_y[1]-sig_roi_y[0])) {
-        throw std::string("TimeTool: Signal and sideband roi y range sizes differ.");
+        s_exc = std::string("TimeTool: Signal and sideband roi y range sizes differ.");
       }
     }
     else {
@@ -359,7 +361,7 @@ void Fex::configure()
         printf("TimeTool: Signal and sideband roi y ranges differ.  Setting sideband roi to signal.\n");
       }
       if ((sb_roi_x[1]-sb_roi_x[0]) != (sig_roi_x[1]-sig_roi_x[0])) {
-        throw std::string("TimeTool: Signal and sideband roi x range sizes differ.");
+        s_exc = std::string("TimeTool: Signal and sideband roi x range sizes differ.");
       }
     }
     m_use_sb_roi = true;
@@ -407,6 +409,9 @@ void Fex::configure()
 
   _cut.clear();
   _cut.resize(NCUTS,0);
+
+  if (!s_exc.empty())
+    throw s_exc;
 }
 
 const TimeToolConfigType* Fex::config(const char* fname)
