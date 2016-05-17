@@ -195,7 +195,7 @@ namespace Pds {
 		  copy_projection(fex.m_sb , d.projected_sideband (fex.config()));
 		  copy_projection(fex.m_ref, d.projected_reference(fex.config()));
 		}
-		Xtc xtc(TypeId(TypeId::Id_TimeToolData,1),src);
+		Xtc xtc(_timetoolDataType,src);
 		xtc.extent += TimeToolDataType::_sizeof(fex.config());
 		dg->insert(xtc, p);
 		delete[] p;
