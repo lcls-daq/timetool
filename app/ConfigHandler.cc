@@ -25,6 +25,10 @@ using Pds::Transition;
 using Pds::TransitionId;
 using Pds::Allocate;
 using Pds::Allocation;
+using Pds::UserMessage;
+using Pds::InDatagram;
+using Pds::TimeToolCfgCache;
+using Pds::EvrCommandRequest;
 using ::TimeTool::ConfigHandler;
 
 ConfigHandler::ConfigHandler(Pds::Appliance& app) : 

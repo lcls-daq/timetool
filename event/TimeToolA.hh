@@ -16,19 +16,19 @@ namespace Pds {
 };
 
 namespace Pds_TimeTool_event {
-  class TimeToolA : public Appliance,
-		    public XtcIterator {
+  class TimeToolA : public Pds::Appliance,
+		    public Pds::XtcIterator {
   public:
     TimeToolA();
     ~TimeToolA();
   public:
-    Transition* transitions(Transition*);
-    InDatagram* events     (InDatagram*);
-    int         process    (Xtc* xtc);
+    Pds::Transition* transitions(Pds::Transition*);
+    Pds::InDatagram* events     (Pds::InDatagram*);
+    int         process    (Pds::Xtc* xtc);
     const ::TimeTool::Fex& fex() const { return _fex; }
   private:
     ::TimeTool::Fex _fex;
-    const Camera::FrameV1* _frame;
+    const Pds::Camera::FrameV1* _frame;
     Pds::EvrData::DataV3* _evrdata;
     Pds::Lusi::IpmFexV1* _ipmdata;
     bool      _bykik;
