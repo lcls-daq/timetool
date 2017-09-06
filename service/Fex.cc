@@ -469,16 +469,16 @@ void Fex::reset()
 }
 
 static bool _calculate_logic(const ndarray<const Pds::TimeTool::EventLogic,1>& cfg,
-			     const ndarray<const Pds::EvrData::FIFOEvent,1>& event)
+                             const ndarray<const Pds::EvrData::FIFOEvent,1>& event)
 {
   bool v = (cfg[0].logic_op() == Pds::TimeTool::EventLogic::L_AND ||
-	    cfg[0].logic_op() == Pds::TimeTool::EventLogic::L_AND_NOT);
+            cfg[0].logic_op() == Pds::TimeTool::EventLogic::L_AND_NOT);
   for(unsigned i=0; i<cfg.size(); i++) {
     bool p=false;
     for(unsigned j=0; j<event.size(); j++)
       if (event[j].eventCode()==cfg[i].event_code()) {
-	p=true;
-	break;
+        p=true;
+        break;
       }
     switch(cfg[i].logic_op()) {
     case Pds::TimeTool::EventLogic::L_OR:
