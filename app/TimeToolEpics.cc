@@ -68,17 +68,19 @@ int TimeToolEpics::process(Xtc* xtc)
   case TypeId::Id_TimeToolData:
     { const TimeToolDataType& d =
         *reinterpret_cast<const TimeToolDataType*>(xtc->payload());
-
-      PVWriter* pvw = _pvwri[xtc->src.phy()];
-      if (pvw->connected()) {
-        double* v = reinterpret_cast<double*>(pvw->data());
-        v[0] = d.position_pixel();
-        v[1] = d.position_time();
-        v[2] = d.amplitude();
-        v[3] = d.nxt_amplitude();
-        v[4] = d.ref_amplitude();
-        v[5] = d.position_fwhm();
-        pvw->put(); 
+      
+      if (d.event_type() == TimeToolDataType::Signal) {
+        PVWriter* pvw = _pvwri[xtc->src.phy()];
+        if (pvw->connected()) {
+          double* v = reinterpret_cast<double*>(pvw->data());
+          v[0] = d.position_pixel();
+          v[1] = d.position_time();
+          v[2] = d.amplitude();
+          v[3] = d.nxt_amplitude();
+          v[4] = d.ref_amplitude();
+          v[5] = d.position_fwhm();
+          pvw->put(); 
+        }
       }
     } break;
   default:
