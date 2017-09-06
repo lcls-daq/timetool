@@ -36,12 +36,15 @@ static ndarray<double,1> load_reference(unsigned key, unsigned sz);
 
 
 Fex::Fex(const char* fname) :
-  _fname(fname+strspn(fname," \t"))
+  _fname(fname+strspn(fname," \t")),
+  _write_ref_auto(true)
 {
 }
 
 Fex::Fex(const Pds::Src& src,
-	 const Pds::TimeTool::ConfigV1& cfg)
+	 const Pds::TimeTool::ConfigV1& cfg,
+   bool write_ref_auto) :
+  _write_ref_auto(write_ref_auto)
 {
   //  m_put_key = std::string(cfg.base_name(),
   //			  cfg.base_name_length());
@@ -119,7 +122,9 @@ Fex::Fex(const Pds::Src& src,
 }
 
 Fex::Fex(const Pds::Src& src,
-	 const Pds::TimeTool::ConfigV2& cfg)
+	 const Pds::TimeTool::ConfigV2& cfg,
+   bool write_ref_auto) :
+  _write_ref_auto(write_ref_auto)
 {
   //  m_put_key = std::string(cfg.base_name(),
   //			  cfg.base_name_length());
@@ -219,16 +224,18 @@ void Fex::init_plots()
 
 void Fex::unconfigure()
 {
-  // Record accumulated reference
+  // Record accumulated reference if auto writing of references is enabled
   char buff[128];
   const char* dir = getenv("HOME");
-  sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
-  FILE* f = fopen(buff,"w");
-  if (f) {
-    for(unsigned i=0; i<m_ref_avg.size(); i++)
-      fprintf(f," %f",m_ref_avg[i]);
-    fprintf(f,"\n");
-    fclose(f);
+  if (_write_ref_auto) {
+    sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
+    FILE* f = fopen(buff,"w");
+    if (f) {
+      for(unsigned i=0; i<m_ref_avg.size(); i++)
+        fprintf(f," %f",m_ref_avg[i]);
+      fprintf(f,"\n");
+      fclose(f);
+    }
   }
 
   if (_cut[NCALLS]>0) {

@@ -21,8 +21,8 @@ namespace TimeTool {
   class Fex {
   public:
     Fex(const char* fname="timetool.input");
-    Fex(const Pds::Src&, const Pds::TimeTool::ConfigV1&);
-    Fex(const Pds::Src&, const Pds::TimeTool::ConfigV2&);
+    Fex(const Pds::Src&, const Pds::TimeTool::ConfigV1&, bool write_ref_auto=true);
+    Fex(const Pds::Src&, const Pds::TimeTool::ConfigV2&, bool write_ref_auto=true);
     virtual ~Fex();
   public:
     void init_plots();
@@ -112,6 +112,7 @@ namespace TimeTool {
 
     bool     _write_image;
     bool     _write_projections;
+    bool     _write_ref_auto;
 
     double _flt_position;
     double _flt_position_ps;

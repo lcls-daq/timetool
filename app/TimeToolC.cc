@@ -107,6 +107,8 @@ namespace Pds {
   public:
     void _monitor_raw_sig (const ndarray<const double,1>&);
     void _monitor_ref_sig (const ndarray<const double,1>&);
+    void _write_ref();
+    void _clear_ref_flag();
   public:
     void reset();
     const TimeToolConfigType& config() const 
@@ -127,10 +129,15 @@ namespace Pds {
   public:
     Transition* transitions(Transition* tr) {
       if (tr->id()==TransitionId::Unconfigure) {
+        for(unsigned i=0; i<_fex.size(); i++) {
+          _fex[i]->_write_ref();
+          delete _fex[i];
+        }
+        _fex  .clear();
+        _frame.clear();
+      } else if (tr->id()==TransitionId::Configure) {
         for(unsigned i=0; i<_fex.size(); i++)
-	  delete _fex[i];
-	_fex  .clear();
-	_frame.clear();
+          _fex[i]->_clear_ref_flag();
       }
       return tr;
     }
@@ -229,19 +236,19 @@ namespace Pds {
           }
       }
       else if (xtc->contains.id()==TypeId::Id_TimeToolConfig) {
-	Fex& fex = *new Fex(xtc->src,
-			    *reinterpret_cast<const TimeToolConfigType*>(xtc->payload()));
-	InDatagram* dg = _dg;
-	const Src& src = xtc->src;
-	_insert_pv(dg, src, 0, fex.base_name()+":AMPL");
-	_insert_pv(dg, src, 1, fex.base_name()+":FLTPOS");
-	_insert_pv(dg, src, 2, fex.base_name()+":FLTPOS_PS");
-	_insert_pv(dg, src, 3, fex.base_name()+":FLTPOSFWHM");
-	_insert_pv(dg, src, 4, fex.base_name()+":AMPLNXT");
-	_insert_pv(dg, src, 5, fex.base_name()+":REFAMPL");
+        Fex& fex = *new Fex(xtc->src,
+                            *reinterpret_cast<const TimeToolConfigType*>(xtc->payload()));
+        InDatagram* dg = _dg;
+        const Src& src = xtc->src;
+        _insert_pv(dg, src, 0, fex.base_name()+":AMPL");
+        _insert_pv(dg, src, 1, fex.base_name()+":FLTPOS");
+        _insert_pv(dg, src, 2, fex.base_name()+":FLTPOS_PS");
+        _insert_pv(dg, src, 3, fex.base_name()+":FLTPOSFWHM");
+        _insert_pv(dg, src, 4, fex.base_name()+":AMPLNXT");
+        _insert_pv(dg, src, 5, fex.base_name()+":REFAMPL");
 
-	_fex  .push_back(&fex);
-	_frame.push_back(0);
+        _fex  .push_back(&fex);
+        _frame.push_back(0);
       }
       return 1;
     }
@@ -256,7 +263,7 @@ namespace Pds {
 
 Fex::Fex(const Src& src,
 	 const TimeToolConfigType& cfg) :
-  ::TimeTool::Fex(src,cfg),
+  ::TimeTool::Fex(src,cfg,false),
   _config_buffer (new char[cfg._sizeof()])
 {
   memcpy(_config_buffer, &cfg, cfg._sizeof());
@@ -275,6 +282,7 @@ void Fex::reset()
 
 typedef std::map<Pds::Src,ndarray<double,1> > MapType;
 
+static bool _ref_written=false;
 static MapType _ref;
 static Semaphore _sem(Semaphore::FULL);
 
@@ -312,6 +320,35 @@ void Fex::_monitor_ref_sig (const ndarray<const double,1>& ref)
   }
 }
  
+void Fex::_write_ref()
+{
+  char buff[128];
+  const char* dir = getenv("HOME");
+  MapType::iterator it = _ref.find(_src);
+  if (it != _ref.end()) {
+    _sem.take();
+    if (!_ref_written) {
+      printf("going to write!\n");
+      sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
+      FILE* f = fopen(buff,"w");
+      if (f) {
+        for(unsigned i=0; i<it->second.size(); i++)
+          fprintf(f," %f",it->second[i]);
+        fprintf(f,"\n");
+        fclose(f);
+      }
+      _ref_written=true;
+    }
+    _sem.give();
+  }
+}
+
+void Fex::_clear_ref_flag()
+{
+  _sem.take();
+  _ref_written=false;
+  _sem.give();
+}
 
 static std::vector<Appliance*> _apps; 
 const std::vector<Appliance*> apps()
