@@ -49,7 +49,7 @@ typedef Pds::EvrData::DataV3 EvrDataType;
 using namespace Pds;
 
 static void copy_projection(ndarray<const int,1> in,
-			    ndarray<const int,1> out)
+                            ndarray<const int,1> out)
 {
   ndarray<int,1> a = make_ndarray<int>(const_cast<int*>(out.data()),out.shape()[0]);
   std::copy(in.begin(),in.end(),a.begin());
@@ -161,8 +161,8 @@ namespace Pds {
             make_ndarray<Pds::EvrData::FIFOEvent>(v[0]);
           for(unsigned i=0; i<v[0]; i++)
             fifo[i] = Pds::EvrData::FIFOEvent(dg->seq.stamp().fiducials(),
-					      dg->seq.stamp().vector(),
-					      v[i+1]);
+                                              dg->seq.stamp().vector(),
+                                              v[i+1]);
 
           for(unsigned i=0; i<_fex.size(); i++) {
             if (_frame[i]) {
@@ -189,24 +189,24 @@ namespace Pds {
               _insert_pv(dg, src, 4, fex.next_amplitude());
               _insert_pv(dg, src, 5, fex.ref_amplitude());
 
-	      { char* p = new char[TimeToolDataType::_sizeof(fex.config())];
-		TimeToolDataType& d = *new (p) TimeToolDataType(fex.event_type(),
-								fex.amplitude(),
-								fex.filtered_position(),
-								fex.filtered_pos_ps(),
-								fex.filtered_fwhm(),
-								fex.next_amplitude(),
-								fex.ref_amplitude());
-		if (fex.write_projections()) {
-		  copy_projection(fex.m_sig, d.projected_signal   (fex.config()));
-		  copy_projection(fex.m_sb , d.projected_sideband (fex.config()));
-		  copy_projection(fex.m_ref, d.projected_reference(fex.config()));
-		}
-		Xtc xtc(_timetoolDataType,src);
-		xtc.extent += TimeToolDataType::_sizeof(fex.config());
-		dg->insert(xtc, p);
-		delete[] p;
-	      }
+              { char* p = new char[TimeToolDataType::_sizeof(fex.config())];
+                TimeToolDataType& d = *new (p) TimeToolDataType(fex.event_type(),
+                                                                fex.amplitude(),
+                                                                fex.filtered_position(),
+                                                                fex.filtered_pos_ps(),
+                                                                fex.filtered_fwhm(),
+                                                                fex.next_amplitude(),
+                                                                fex.ref_amplitude());
+                if (fex.write_projections()) {
+                  copy_projection(fex.m_sig, d.projected_signal   (fex.config()));
+                  copy_projection(fex.m_sb , d.projected_sideband (fex.config()));
+                  copy_projection(fex.m_ref, d.projected_reference(fex.config()));
+                }
+                Xtc xtc(_timetoolDataType,src);
+                xtc.extent += TimeToolDataType::_sizeof(fex.config());
+                dg->insert(xtc, p);
+                delete[] p;
+              }
             }
           }
 
@@ -262,7 +262,7 @@ namespace Pds {
 
 
 Fex::Fex(const Src& src,
-	 const TimeToolConfigType& cfg) :
+         const TimeToolConfigType& cfg) :
   ::TimeTool::Fex(src,cfg,false),
   _config_buffer (new char[cfg._sizeof()])
 {
@@ -328,7 +328,6 @@ void Fex::_write_ref()
   if (it != _ref.end()) {
     _sem.take();
     if (!_ref_written) {
-      printf("going to write!\n");
       sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
       FILE* f = fopen(buff,"w");
       if (f) {

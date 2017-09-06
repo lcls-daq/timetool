@@ -22,15 +22,15 @@ using Pds::DetInfo;
 using namespace TimeTool;
 
 enum Cuts { NCALLS, NOLASER, FRAMESIZE, PROJCUT, 
-	    NOBEAM, NOREF, NOFITS, NCUTS };
+            NOBEAM, NOREF, NOFITS, NCUTS };
 static const char* cuts[] = {"NCalls",
-			     "NoLaser",
-			     "FrameSize",
-			     "ProjCut",
-			     "NoBeam",
-			     "NoRef",
-			     "NoFits",
-			     NULL };
+                             "NoLaser",
+                             "FrameSize",
+                             "ProjCut",
+                             "NoBeam",
+                             "NoRef",
+                             "NoFits",
+                             NULL };
 
 static ndarray<double,1> load_reference(unsigned key, unsigned sz);
 
@@ -42,12 +42,12 @@ Fex::Fex(const char* fname) :
 }
 
 Fex::Fex(const Pds::Src& src,
-	 const Pds::TimeTool::ConfigV1& cfg,
-   bool write_ref_auto) :
+         const Pds::TimeTool::ConfigV1& cfg,
+         bool write_ref_auto) :
   _write_ref_auto(write_ref_auto)
 {
   //  m_put_key = std::string(cfg.base_name(),
-  //			  cfg.base_name_length());
+  //                          cfg.base_name_length());
   m_put_key = std::string(cfg.base_name());
 
   _src = src;
@@ -55,13 +55,13 @@ Fex::Fex(const Pds::Src& src,
 
   m_beam_logic = make_ndarray<Pds::TimeTool::EventLogic>(cfg.beam_logic().size());
   std::copy(cfg.beam_logic().begin(),
-	    cfg.beam_logic().end(),
-	    m_beam_logic.begin());
+            cfg.beam_logic().end(),
+            m_beam_logic.begin());
 
   m_laser_logic = make_ndarray<Pds::TimeTool::EventLogic>(cfg.laser_logic().size());
   std::copy(cfg.laser_logic().begin(),
-	    cfg.laser_logic().end(),
-	    m_laser_logic.begin());
+            cfg.laser_logic().end(),
+            m_laser_logic.begin());
 
   m_calib_poly.resize(cfg.calib_poly_dim());
   std::copy(cfg.calib_poly().begin(),cfg.calib_poly().end(),m_calib_poly.data());
@@ -122,12 +122,12 @@ Fex::Fex(const Pds::Src& src,
 }
 
 Fex::Fex(const Pds::Src& src,
-	 const Pds::TimeTool::ConfigV2& cfg,
-   bool write_ref_auto) :
+         const Pds::TimeTool::ConfigV2& cfg,
+         bool write_ref_auto) :
   _write_ref_auto(write_ref_auto)
 {
   //  m_put_key = std::string(cfg.base_name(),
-  //			  cfg.base_name_length());
+  //                          cfg.base_name_length());
   m_put_key = std::string(cfg.base_name());
 
   _src = src;
@@ -135,13 +135,13 @@ Fex::Fex(const Pds::Src& src,
 
   m_beam_logic = make_ndarray<Pds::TimeTool::EventLogic>(cfg.beam_logic().size());
   std::copy(cfg.beam_logic().begin(),
-	    cfg.beam_logic().end(),
-	    m_beam_logic.begin());
+            cfg.beam_logic().end(),
+            m_beam_logic.begin());
 
   m_laser_logic = make_ndarray<Pds::TimeTool::EventLogic>(cfg.laser_logic().size());
   std::copy(cfg.laser_logic().begin(),
-	    cfg.laser_logic().end(),
-	    m_laser_logic.begin());
+            cfg.laser_logic().end(),
+            m_laser_logic.begin());
 
   m_calib_poly.resize(cfg.calib_poly_dim());
   std::copy(cfg.calib_poly().begin(),cfg.calib_poly().end(),m_calib_poly.data());
@@ -228,7 +228,7 @@ void Fex::unconfigure()
   char buff[128];
   const char* dir = getenv("HOME");
   if (_write_ref_auto) {
-    sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
+    sprintf(buff,"%s/timetool.ref.%08x_bad", dir ? dir : "/tmp", m_get_key);
     FILE* f = fopen(buff,"w");
     if (f) {
       for(unsigned i=0; i<m_ref_avg.size(); i++)
@@ -242,9 +242,9 @@ void Fex::unconfigure()
     printf("TimeTool::Fex Summary\n");
     for(unsigned i=0; i<NCUTS; i++)
       printf("%s: %3.2f [%u]\n",
-	     cuts[i], 
-	     double(_cut[i])/double(_cut[NCALLS]),
-	     _cut[i]);
+             cuts[i], 
+             double(_cut[i])/double(_cut[NCALLS]),
+             _cut[i]);
   }
 }
 
@@ -286,17 +286,17 @@ void Fex::configure()
   { int code = svc.config("event_code_bykik", 162);
     m_beam_logic[0] = 
       Pds::TimeTool::EventLogic(abs(code),
-				code>0 ?
-				Pds::TimeTool::EventLogic::L_AND_NOT :
-				Pds::TimeTool::EventLogic::L_AND); }
+                                code>0 ?
+                                Pds::TimeTool::EventLogic::L_AND_NOT :
+                                Pds::TimeTool::EventLogic::L_AND); }
 
   m_laser_logic = make_ndarray<Pds::TimeTool::EventLogic>(1);
   { int code = svc.config("event_code_no_laser", 0);
     m_laser_logic[0] = 
       Pds::TimeTool::EventLogic(abs(code),
-				code>=0 ?
-				Pds::TimeTool::EventLogic::L_AND_NOT :
-				Pds::TimeTool::EventLogic::L_AND); }
+                                code>=0 ?
+                                Pds::TimeTool::EventLogic::L_AND_NOT :
+                                Pds::TimeTool::EventLogic::L_AND); }
 
   {
     std::string s = svc.config("ipm_beam_src",std::string());
@@ -509,9 +509,9 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   _cut[NCALLS]++;
 
   bool nobeam   = !_calculate_logic(m_beam_logic,
-				    evr);
+                                    evr);
   bool nolaser  = !_calculate_logic(m_laser_logic,
-				    evr);
+                                    evr);
 
 #ifdef DBUG
   printf("event_codes: ");
@@ -520,9 +520,9 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   printf("\n");
 
   printf("%05x [%08x] beam %c  laser %c\n", 
-	 evr[0].timestampHigh(),
-	 1<<(evr[0].timestampLow()&0x1f),
-	 nobeam ? 'F':'T', nolaser ? 'F':'T');
+         evr[0].timestampHigh(),
+         1<<(evr[0].timestampLow()&0x1f),
+         nobeam ? 'F':'T', nolaser ? 'F':'T');
 #endif
 
   if (nolaser) { _cut[NOLASER]++; return; }
@@ -576,27 +576,27 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   //
   unsigned pdim = m_projectX ? 1:0;
   m_sig = psalg::project(f,
-			 m_sig_roi_lo,
-			 m_sig_roi_hi,
-			 m_pedestal, pdim);
+                         m_sig_roi_lo,
+                         m_sig_roi_hi,
+                         m_pedestal, pdim);
 
   //
   //  Calculate sideband correction
   //
   if (m_use_sb_roi)
     m_sb = psalg::project(f,
-			  m_sb_roi_lo ,
-			  m_sb_roi_hi,
-			  m_pedestal, pdim);
-  
+                          m_sb_roi_lo,
+                          m_sb_roi_hi,
+                          m_pedestal, pdim);
+
   //
   //  Calculate reference correction
   //
   if (m_use_ref_roi)
     m_ref = psalg::project(f,
-			   m_ref_roi_lo ,
-			   m_ref_roi_hi,
-			   m_pedestal, pdim);
+                           m_ref_roi_lo ,
+                           m_ref_roi_hi,
+                           m_pedestal, pdim);
   
   ndarray<double,1> sigd = make_ndarray<double>(m_sig.shape()[0]);
   ndarray<double,1> refd = make_ndarray<double>(m_sig.shape()[0]);
@@ -611,22 +611,22 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
 
     if (m_use_ref_roi)
       for(unsigned i=0; i<m_sig.shape()[0]; i++) {
-	sigd[i] = double(m_sig[i])-sbc[i];
-	refd[i] = double(m_ref[i])-sbc[i];
+        sigd[i] = double(m_sig[i])-sbc[i];
+        refd[i] = double(m_ref[i])-sbc[i];
       }
     else
       for(unsigned i=0; i<m_sig.shape()[0]; i++)
-	sigd[i] = double(m_sig[i])-sbc[i];
+        sigd[i] = double(m_sig[i])-sbc[i];
   }
   else {
     if (m_use_ref_roi)
       for(unsigned i=0; i<m_sig.shape()[0]; i++) {
-	sigd[i] = double(m_sig[i]);
-	refd[i] = double(m_ref[i]);
+        sigd[i] = double(m_sig[i]);
+        refd[i] = double(m_ref[i]);
       }
     else
       for(unsigned i=0; i<m_sig.shape()[0]; i++)
-	sigd[i] = double(m_sig[i]);
+        sigd[i] = double(m_sig[i]);
   }
 
   //
@@ -711,8 +711,8 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
 }
 
 void Fex::analyze(EventType etype,
-		  const ndarray<const int,1>& signal,
-		  const ndarray<const int,1>& sideband) 
+                  const ndarray<const int,1>& signal,
+                  const ndarray<const int,1>& sideband) 
 {
   _cut[NCALLS]++;
 
@@ -722,7 +722,7 @@ void Fex::analyze(EventType etype,
 
 #ifdef DBUG
   printf("beam %c  laser %c\n", 
-	 nobeam ? 'F':'T', nolaser ? 'F':'T');
+         nobeam ? 'F':'T', nolaser ? 'F':'T');
 #endif
 
   if (nolaser) { _cut[NOLASER]++; return; }
@@ -829,9 +829,9 @@ void Fex::analyze(EventType etype,
 
 
 void Fex::analyze(EventType etype,
-		  const ndarray<const int,1>& signal,
-		  const ndarray<const int,1>& sideband, 
-		  const ndarray<const int,1>& reference) 
+                  const ndarray<const int,1>& signal,
+                  const ndarray<const int,1>& sideband, 
+                  const ndarray<const int,1>& reference) 
 {
   _cut[NCALLS]++;
 
@@ -841,7 +841,7 @@ void Fex::analyze(EventType etype,
 
 #ifdef DBUG
   printf("beam %c  laser %c\n", 
-	 nobeam ? 'F':'T', nolaser ? 'F':'T');
+         nobeam ? 'F':'T', nolaser ? 'F':'T');
 #endif
 
   if (nolaser) { _cut[NOLASER]++; return; }
