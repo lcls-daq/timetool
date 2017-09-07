@@ -108,7 +108,7 @@ namespace Pds {
     void _monitor_raw_sig (const ndarray<const double,1>&);
     void _monitor_ref_sig (const ndarray<const double,1>&);
     void _write_ref();
-    void _clear_ref_flag();
+    void _enable_write_ref();
   public:
     void reset();
     const TimeToolConfigType& config() const 
@@ -135,9 +135,6 @@ namespace Pds {
         }
         _fex  .clear();
         _frame.clear();
-      } else if (tr->id()==TransitionId::Configure) {
-        for(unsigned i=0; i<_fex.size(); i++)
-          _fex[i]->_clear_ref_flag();
       }
       return tr;
     }
@@ -238,6 +235,8 @@ namespace Pds {
       else if (xtc->contains.id()==TypeId::Id_TimeToolConfig) {
         Fex& fex = *new Fex(xtc->src,
                             *reinterpret_cast<const TimeToolConfigType*>(xtc->payload()));
+        fex._enable_write_ref();
+
         InDatagram* dg = _dg;
         const Src& src = xtc->src;
         _insert_pv(dg, src, 0, fex.base_name()+":AMPL");
@@ -342,7 +341,7 @@ void Fex::_write_ref()
   }
 }
 
-void Fex::_clear_ref_flag()
+void Fex::_enable_write_ref()
 {
   _sem.take();
   _ref_written=false;
