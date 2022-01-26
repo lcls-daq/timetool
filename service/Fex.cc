@@ -14,13 +14,26 @@
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#include <dirent.h>
 
 //#define DBUG
 
 static const char* default_ref_path()
 {
-  const char* dir = getenv("HOME");
-  return dir ? dir : "/tmp";
+  static char path[PATH_MAX];
+  const char* hdir = getenv("HOME");
+  if (hdir) {
+    sprintf(path,"%s/timetool", hdir);
+    DIR *dir = opendir(path);
+    if (dir) {
+      closedir(dir);
+      return path;
+    } else {
+      return hdir;
+    }
+  } else {
+    return "/tmp";
+  }
 }
 
 typedef Pds::TimeTool::ConfigV3  TimeToolConfigType;
