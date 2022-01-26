@@ -1,5 +1,6 @@
 #include "Fex.hh"
 #include "Config.hh"
+#include "Fitter.hh"
 
 #include "pdsdata/psddl/opal1k.ddl.h"
 #include "pdsdata/xtc/DetInfo.hh"
@@ -16,12 +17,18 @@
 
 //#define DBUG
 
-typedef Pds::TimeTool::ConfigV2  TimeToolConfigType;
+static const char* default_ref_path()
+{
+  const char* dir = getenv("HOME");
+  return dir ? dir : "/tmp";
+}
+
+typedef Pds::TimeTool::ConfigV3  TimeToolConfigType;
 
 using Pds::DetInfo;
 using namespace TimeTool;
 
-enum Cuts { NCALLS, NOLASER, FRAMESIZE, PROJCUT, 
+enum Cuts { NCALLS, NOLASER, FRAMESIZE, PROJCUT,
             NOBEAM, NOREF, NOFITS, NCUTS };
 static const char* cuts[] = {"NCalls",
                              "NoLaser",
@@ -32,19 +39,30 @@ static const char* cuts[] = {"NCalls",
                              "NoFits",
                              NULL };
 
-static ndarray<double,1> load_reference(unsigned key, unsigned sz);
+static ndarray<double,1> load_reference(unsigned key, unsigned sz, const char* dir);
+
+static ndarray<double,2> load_reference(unsigned key, unsigned row_sz, unsigned col_sz, const char* dir);
 
 
-Fex::Fex(const char* fname) :
+Fex::Fex(const char* fname,
+         bool write_ref_auto,
+         bool verbose,
+         const char* ref_path) :
   _fname(fname+strspn(fname," \t")),
-  _write_ref_auto(true)
+  _ref_path(ref_path ? ref_path : default_ref_path()),
+  _write_ref_auto(write_ref_auto),
+  _fitter(new Fitter(verbose))
 {
 }
 
 Fex::Fex(const Pds::Src& src,
          const Pds::TimeTool::ConfigV1& cfg,
-         bool write_ref_auto) :
-  _write_ref_auto(write_ref_auto)
+         bool write_ref_auto,
+         bool verbose,
+         const char* ref_path) :
+  _ref_path(ref_path ? ref_path : default_ref_path()),
+  _write_ref_auto(write_ref_auto),
+  _fitter(new Fitter(verbose))
 {
   //  m_put_key = std::string(cfg.base_name(),
   //                          cfg.base_name_length());
@@ -70,6 +88,9 @@ Fex::Fex(const Pds::Src& src,
 
   m_proj_cut = cfg.signal_cut();
 
+  m_use_full_roi = false;
+  m_use_fit = false;
+
   m_frame_roi[0] = m_frame_roi[1] = 0;
 
   m_sig_roi_lo[0] = cfg.sig_roi_lo().row();
@@ -82,7 +103,7 @@ Fex::Fex(const Pds::Src& src,
     m_use_sb_roi = true;
     m_sb_roi_lo[0] = cfg.sb_roi_lo().row();
     m_sb_roi_lo[1] = cfg.sb_roi_lo().column();
-    
+
     m_sb_roi_hi[0] = cfg.sb_roi_hi().row();
     m_sb_roi_hi[1] = cfg.sb_roi_hi().column();
   }
@@ -103,6 +124,10 @@ Fex::Fex(const Pds::Src& src,
 
   _indicator_offset = -cfg.number_of_weights()/2;
 
+  m_fit_max_iterations = 0;
+  m_fit_weights_factor = 0.;
+  m_fit_params = ndarray<double,1>();
+
   _write_image = cfg.write_image();
   _write_projections = cfg.write_projections();
 
@@ -110,10 +135,25 @@ Fex::Fex(const Pds::Src& src,
     m_sig_roi_hi[1]-m_sig_roi_lo[1]+1 :
     m_sig_roi_hi[0]-m_sig_roi_lo[0]+1;
 
-  m_ref_avg = load_reference(m_get_key,sz);
+  if (m_use_fit)
+    _fitter->configure(sz,
+                       m_fit_max_iterations,
+                       m_fit_weights_factor,
+                       m_fit_params);
+
+  m_ref_offset = m_use_fit ? 0.0 : 1.0;
+
+  m_flt_offset = m_weights.size() / 2;
+
+  m_ref_avg = load_reference(m_get_key,sz,_ref_path.c_str());
   m_sig  = ndarray<const int,1>();
   m_sb   = ndarray<const int,1>();
   m_ref  = ndarray<const int,1>();
+
+  m_ref_avg_full = ndarray<double,2>();
+  m_sig_full = ndarray<const int,2>();
+  m_sb_full  = ndarray<const int,2>();
+  m_ref_full = ndarray<const int,2>();
 
   m_pedestal = 32;
 
@@ -123,8 +163,12 @@ Fex::Fex(const Pds::Src& src,
 
 Fex::Fex(const Pds::Src& src,
          const Pds::TimeTool::ConfigV2& cfg,
-         bool write_ref_auto) :
-  _write_ref_auto(write_ref_auto)
+         bool write_ref_auto,
+         bool verbose,
+         const char* ref_path) :
+  _ref_path(ref_path ? ref_path : default_ref_path()),
+  _write_ref_auto(write_ref_auto),
+  _fitter(new Fitter(verbose))
 {
   //  m_put_key = std::string(cfg.base_name(),
   //                          cfg.base_name_length());
@@ -146,9 +190,12 @@ Fex::Fex(const Pds::Src& src,
   m_calib_poly.resize(cfg.calib_poly_dim());
   std::copy(cfg.calib_poly().begin(),cfg.calib_poly().end(),m_calib_poly.data());
 
-  m_projectX = (cfg.project_axis() == TimeToolConfigType::X);
+  m_projectX = (cfg.project_axis() == Pds::TimeTool::ConfigV2::X);
 
   m_proj_cut = cfg.signal_cut();
+
+  m_use_full_roi = false;
+  m_use_fit = false;
 
   m_frame_roi[0] = m_frame_roi[1] = 0;
 
@@ -162,7 +209,7 @@ Fex::Fex(const Pds::Src& src,
     m_use_sb_roi = true;
     m_sb_roi_lo[0] = cfg.sb_roi_lo().row();
     m_sb_roi_lo[1] = cfg.sb_roi_lo().column();
-    
+
     m_sb_roi_hi[0] = cfg.sb_roi_hi().row();
     m_sb_roi_hi[1] = cfg.sb_roi_hi().column();
   }
@@ -176,7 +223,7 @@ Fex::Fex(const Pds::Src& src,
     m_use_ref_roi = true;
     m_ref_roi_lo[0] = cfg.ref_roi_lo().row();
     m_ref_roi_lo[1] = cfg.ref_roi_lo().column();
-    
+
     m_ref_roi_hi[0] = cfg.ref_roi_hi().row();
     m_ref_roi_hi[1] = cfg.ref_roi_hi().column();
   }
@@ -194,6 +241,10 @@ Fex::Fex(const Pds::Src& src,
 
   _indicator_offset = -cfg.number_of_weights()/2;
 
+  m_fit_max_iterations = 0;
+  m_fit_weights_factor = 0.;
+  m_fit_params = ndarray<double,1>();
+
   _write_image = cfg.write_image();
   _write_projections = cfg.write_projections();
 
@@ -201,10 +252,25 @@ Fex::Fex(const Pds::Src& src,
     m_sig_roi_hi[1]-m_sig_roi_lo[1]+1 :
     m_sig_roi_hi[0]-m_sig_roi_lo[0]+1;
 
-  m_ref_avg = load_reference(m_get_key,sz);
+  if (m_use_fit)
+    _fitter->configure(sz,
+                       m_fit_max_iterations,
+                       m_fit_weights_factor,
+                       m_fit_params);
+
+  m_ref_offset = m_use_fit ? 0.0 : 1.0;
+
+  m_flt_offset = m_weights.size() / 2;
+
+  m_ref_avg = load_reference(m_get_key,sz,_ref_path.c_str());
   m_sig = ndarray<const int,1>();
   m_sb  = ndarray<const int,1>();
   m_ref = ndarray<const int,1>();
+
+  m_ref_avg_full = ndarray<double,2>();
+  m_sig_full = ndarray<const int,2>();
+  m_sb_full  = ndarray<const int,2>();
+  m_ref_full = ndarray<const int,2>();
 
   m_pedestal = 32;
 
@@ -212,27 +278,154 @@ Fex::Fex(const Pds::Src& src,
   _cut.resize(NCUTS,0);
 }
 
-Fex::~Fex() 
+Fex::Fex(const Pds::Src& src,
+         const Pds::TimeTool::ConfigV3& cfg,
+         bool write_ref_auto,
+         bool verbose,
+         const char* ref_path) :
+  _ref_path(ref_path ? ref_path : default_ref_path()),
+  _write_ref_auto(write_ref_auto),
+  _fitter(new Fitter(verbose))
+{
+  //  m_put_key = std::string(cfg.base_name(),
+  //                          cfg.base_name_length());
+  m_put_key = std::string(cfg.base_name());
+
+  _src = src;
+  m_get_key = src.phy();
+
+  m_beam_logic = make_ndarray<Pds::TimeTool::EventLogic>(cfg.beam_logic().size());
+  std::copy(cfg.beam_logic().begin(),
+            cfg.beam_logic().end(),
+            m_beam_logic.begin());
+
+  m_laser_logic = make_ndarray<Pds::TimeTool::EventLogic>(cfg.laser_logic().size());
+  std::copy(cfg.laser_logic().begin(),
+            cfg.laser_logic().end(),
+            m_laser_logic.begin());
+
+  m_calib_poly.resize(cfg.calib_poly_dim());
+  std::copy(cfg.calib_poly().begin(),cfg.calib_poly().end(),m_calib_poly.data());
+
+  m_projectX = (cfg.project_axis() == Pds::TimeTool::ConfigV3::X);
+
+  m_proj_cut = cfg.signal_cut();
+
+  m_use_full_roi = cfg.use_full_roi();
+  m_use_fit = cfg.use_fit();
+
+  m_frame_roi[0] = m_frame_roi[1] = 0;
+
+  m_sig_roi_lo[0] = cfg.sig_roi_lo().row();
+  m_sig_roi_lo[1] = cfg.sig_roi_lo().column();
+
+  m_sig_roi_hi[0] = cfg.sig_roi_hi().row();
+  m_sig_roi_hi[1] = cfg.sig_roi_hi().column();
+
+  if (cfg.subtract_sideband()) {
+    m_use_sb_roi = true;
+    m_sb_roi_lo[0] = cfg.sb_roi_lo().row();
+    m_sb_roi_lo[1] = cfg.sb_roi_lo().column();
+
+    m_sb_roi_hi[0] = cfg.sb_roi_hi().row();
+    m_sb_roi_hi[1] = cfg.sb_roi_hi().column();
+  }
+  else {
+    m_use_sb_roi = false;
+    m_sb_roi_lo[0] = m_sb_roi_hi[0] = 0;
+    m_sb_roi_lo[1] = m_sb_roi_hi[1] = 0;
+  }
+
+  if (cfg.use_reference_roi()) {
+    m_use_ref_roi = true;
+    m_ref_roi_lo[0] = cfg.ref_roi_lo().row();
+    m_ref_roi_lo[1] = cfg.ref_roi_lo().column();
+
+    m_ref_roi_hi[0] = cfg.ref_roi_hi().row();
+    m_ref_roi_hi[1] = cfg.ref_roi_hi().column();
+  }
+  else {
+    m_use_ref_roi = false;
+    m_ref_roi_lo[0] = m_ref_roi_hi[0] = 0;
+    m_ref_roi_lo[1] = m_ref_roi_hi[1] = 0;
+  }
+
+  m_sb_convergence  = cfg.sb_convergence();
+  m_ref_convergence = cfg.ref_convergence();
+
+  m_weights = make_ndarray<double>(cfg.number_of_weights());
+  std::copy(cfg.weights().begin(), cfg.weights().end(), m_weights.data());
+
+  _indicator_offset = -cfg.number_of_weights()/2;
+
+  m_fit_max_iterations = cfg.fit_max_iterations();
+  m_fit_weights_factor = cfg.fit_weights_factor();
+  m_fit_params = make_ndarray<double>(cfg.fit_params_dim());
+  std::copy(cfg.fit_params().begin(), cfg.fit_params().end(), m_fit_params.data());
+
+  _write_image = cfg.write_image();
+  _write_projections = cfg.write_projections();
+
+  unsigned col_sz = m_sig_roi_hi[1]-m_sig_roi_lo[1]+1;
+  unsigned row_sz = m_sig_roi_hi[0]-m_sig_roi_lo[0]+1;
+  unsigned sz = m_projectX ? col_sz : row_sz;
+
+  if (m_use_fit)
+    _fitter->configure(sz,
+                       m_fit_max_iterations,
+                       m_fit_weights_factor,
+                       m_fit_params);
+
+  m_ref_offset = m_use_fit ? 0.0 : 1.0;
+
+  m_flt_offset = m_weights.size() / 2;
+
+  const char* dir = _ref_path.c_str();
+
+  m_ref_avg = m_use_full_roi ? ndarray<double,1>() : load_reference(m_get_key,sz,dir);
+  m_sig = ndarray<const int,1>();
+  m_sb  = ndarray<const int,1>();
+  m_ref = ndarray<const int,1>();
+
+  m_ref_avg_full = m_use_full_roi ? load_reference(m_get_key,row_sz,col_sz,dir) : ndarray<double,2>();
+  m_sig_full = ndarray<const int,2>();
+  m_sb_full  = ndarray<const int,2>();
+  m_ref_full = ndarray<const int,2>();
+
+  m_pedestal = 32;
+
+  _cut.clear();
+  _cut.resize(NCUTS,0);
+}
+
+Fex::~Fex()
 {
   unconfigure();
 }
 
 void Fex::init_plots()
 {
+  if (m_use_full_roi)
+    _monitor_ref_sig_full( m_ref_avg_full );
   _monitor_ref_sig( m_ref_avg );
 }
 
 void Fex::unconfigure()
 {
   // Record accumulated reference if auto writing of references is enabled
-  char buff[128];
-  const char* dir = getenv("HOME");
+  char buff[PATH_MAX];
   if (_write_ref_auto) {
-    sprintf(buff,"%s/timetool.ref.%08x_bad", dir ? dir : "/tmp", m_get_key);
+    sprintf(buff,"%s/timetool.ref.%08x_bad", _ref_path.c_str(), m_get_key);
     FILE* f = fopen(buff,"w");
     if (f) {
-      for(unsigned i=0; i<m_ref_avg.size(); i++)
-        fprintf(f," %f",m_ref_avg[i]);
+      if (m_use_full_roi) {
+        for(unsigned i=0; i<m_ref_avg_full.shape()[0]; i++)
+          for(unsigned j=0; j<m_ref_avg_full.shape()[1]; j++)
+            fprintf(f," %f",m_ref_avg_full(i,j));
+      } else {
+        for(unsigned i=0; i<m_ref_avg.size(); i++)
+          fprintf(f," %f",m_ref_avg[i]);
+      }
       fprintf(f,"\n");
       fclose(f);
     }
@@ -242,7 +435,7 @@ void Fex::unconfigure()
     printf("TimeTool::Fex Summary\n");
     for(unsigned i=0; i<NCUTS; i++)
       printf("%s: %3.2f [%u]\n",
-             cuts[i], 
+             cuts[i],
              double(_cut[i])/double(_cut[NCALLS]),
              _cut[i]);
   }
@@ -252,7 +445,7 @@ void Fex::configure()
 {
   std::string s_exc;
 
-  char buff[128];
+  char buff[PATH_MAX];
   if (_fname[0]=='/')
     strcpy(buff,_fname.c_str());
   else {
@@ -281,10 +474,10 @@ void Fex::configure()
     }
   }
   m_get_key = _src.phy();
-  
+
   m_beam_logic = make_ndarray<Pds::TimeTool::EventLogic>(1);
   { int code = svc.config("event_code_bykik", 162);
-    m_beam_logic[0] = 
+    m_beam_logic[0] =
       Pds::TimeTool::EventLogic(abs(code),
                                 code>0 ?
                                 Pds::TimeTool::EventLogic::L_AND_NOT :
@@ -292,7 +485,7 @@ void Fex::configure()
 
   m_laser_logic = make_ndarray<Pds::TimeTool::EventLogic>(1);
   { int code = svc.config("event_code_no_laser", 0);
-    m_laser_logic[0] = 
+    m_laser_logic[0] =
       Pds::TimeTool::EventLogic(abs(code),
                                 code>=0 ?
                                 Pds::TimeTool::EventLogic::L_AND_NOT :
@@ -405,12 +598,46 @@ void Fex::configure()
       m_weights[i] = w[w.size()-i-1];
   }
 
+  m_fit_max_iterations = svc.config("fit_max_iterations", 100);
+  m_fit_weights_factor = svc.config("fit_weights_factor", 0.1);
+
+  {
+    std::vector<double> fp = svc.config("fit_params",std::vector<double>());
+    m_fit_params = make_ndarray<double>(fp.size());
+    std::copy(fp.begin(), fp.end(), m_fit_params.data());
+  }
+
   _write_image       = svc.config("write_image",true);
   _write_projections = svc.config("write_projections",false);
 
-  m_ref_avg = load_reference(m_get_key,sig_roi_x[1]-sig_roi_x[0]+1);
+  m_use_full_roi = svc.config("use_full_roi",false);
+  m_use_fit  = svc.config("use_fit",false);
+
+  unsigned col_sz = m_sig_roi_hi[1]-m_sig_roi_lo[1]+1;
+  unsigned row_sz = m_sig_roi_hi[0]-m_sig_roi_lo[0]+1;
+  unsigned sz = m_projectX ? col_sz : row_sz;
+
+  if (m_use_fit)
+    _fitter->configure(sz,
+                       m_fit_max_iterations,
+                       m_fit_weights_factor,
+                       m_fit_params);
+
+  m_ref_offset = m_use_fit ? 0.0 : 1.0;
+
+  m_flt_offset = m_weights.size() / 2;
+
+  const char* dir = _ref_path.c_str();
+
+  m_ref_avg = m_use_full_roi ? ndarray<double,1>() : load_reference(m_get_key,sz,dir);
   m_sig = ndarray<const int,1>();
   m_sb  = ndarray<const int,1>();
+  m_ref = ndarray<const int,1>();
+
+  m_ref_avg_full = m_use_full_roi ? load_reference(m_get_key,row_sz,col_sz,dir) : ndarray<double,2>();
+  m_sig_full = ndarray<const int,2>();
+  m_sb_full  = ndarray<const int,2>();
+  m_ref_full = ndarray<const int,2>();
 
   m_pedestal = 32;
 
@@ -430,19 +657,25 @@ const TimeToolConfigType* Fex::config(const char* fname)
                              fex.m_laser_logic.size(),
                              fex.m_weights.size(),
                              fex.m_calib_poly.size(),
+                             fex.m_fit_params.size(),
                              fex.m_put_key.size());
   char* p = new char[tmplate._sizeof()];
   return new(p) TimeToolConfigType(fex.m_projectX ? TimeToolConfigType::X : TimeToolConfigType::Y,
+                                   fex.m_use_full_roi,
+                                   fex.m_use_fit,
                                    fex._write_image,
                                    fex._write_projections,
                                    fex.m_use_sb_roi,
                                    fex.m_use_ref_roi,
                                    fex.m_weights.size(),
                                    fex.m_calib_poly.size(),
+                                   fex.m_fit_params.size(),
                                    fex.m_put_key.size(),
                                    fex.m_beam_logic.size(),
                                    fex.m_laser_logic.size(),
                                    fex.m_proj_cut,
+                                   fex.m_fit_max_iterations,
+                                   fex.m_fit_weights_factor,
                                    Pds::Camera::FrameCoord(fex.m_sig_roi_lo[1],
                                                            fex.m_sig_roi_lo[0]),
                                    Pds::Camera::FrameCoord(fex.m_sig_roi_hi[1],
@@ -461,11 +694,12 @@ const TimeToolConfigType* Fex::config(const char* fname)
                                    fex.m_laser_logic.data(),
                                    fex.m_weights.data(),
                                    fex.m_calib_poly.data(),
+                                   fex.m_fit_params.data(),
                                    fex.m_put_key.c_str());
-                                   
+
 }
 
-void Fex::reset() 
+void Fex::reset()
 {
   _flt_position  = 0;
   _flt_position_ps = 0;
@@ -519,7 +753,7 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
     printf("%d ",evr[i].eventCode());
   printf("\n");
 
-  printf("%05x [%08x] beam %c  laser %c\n", 
+  printf("%05x [%08x] beam %c  laser %c\n",
          evr[0].timestampHigh(),
          1<<(evr[0].timestampLow()&0x1f),
          nobeam ? 'F':'T', nolaser ? 'F':'T');
@@ -571,35 +805,68 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   if (!msg.empty())
     throw msg;
 
+  ndarray<double,1> sigd = ndarray<double,1>();
+  ndarray<double,1> refd = ndarray<double,1>();
+
+  ndarray<double,2> sigd_full = ndarray<double,2>();
+  ndarray<double,2> refd_full = ndarray<double,2>();
+
   //
   //  Project signal ROI
   //
   unsigned pdim = m_projectX ? 1:0;
-  m_sig = psalg::project(f,
-                         m_sig_roi_lo,
-                         m_sig_roi_hi,
-                         m_pedestal, pdim);
+  if (m_use_full_roi) {
+    m_sig_full = psalg::roi(f,
+                            m_sig_roi_lo,
+                            m_sig_roi_hi,
+                            m_pedestal);
+    //
+    //  Calculate sideband correction
+    //
+    if (m_use_sb_roi)
+      m_sb_full = psalg::roi(f,
+                             m_sb_roi_lo,
+                             m_sb_roi_hi,
+                             m_pedestal);
 
-  //
-  //  Calculate sideband correction
-  //
-  if (m_use_sb_roi)
-    m_sb = psalg::project(f,
-                          m_sb_roi_lo,
-                          m_sb_roi_hi,
-                          m_pedestal, pdim);
+    //
+    //  Calculate reference correction
+    //
+    if (m_use_ref_roi)
+      m_ref_full = psalg::roi(f,
+                              m_ref_roi_lo,
+                              m_ref_roi_hi,
+                              m_pedestal);
 
-  //
-  //  Calculate reference correction
-  //
-  if (m_use_ref_roi)
-    m_ref = psalg::project(f,
-                           m_ref_roi_lo ,
-                           m_ref_roi_hi,
+    sigd_full = make_ndarray<double>(m_sig_full.shape()[0],m_sig_full.shape()[1]);
+    refd_full = make_ndarray<double>(m_sig_full.shape()[0],m_sig_full.shape()[1]);
+  } else {
+    m_sig = psalg::project(f,
+                           m_sig_roi_lo,
+                           m_sig_roi_hi,
                            m_pedestal, pdim);
-  
-  ndarray<double,1> sigd = make_ndarray<double>(m_sig.shape()[0]);
-  ndarray<double,1> refd = make_ndarray<double>(m_sig.shape()[0]);
+
+    //
+    //  Calculate sideband correction
+    //
+    if (m_use_sb_roi)
+      m_sb = psalg::project(f,
+                            m_sb_roi_lo,
+                            m_sb_roi_hi,
+                            m_pedestal, pdim);
+
+    //
+    //  Calculate reference correction
+    //
+    if (m_use_ref_roi)
+      m_ref = psalg::project(f,
+                             m_ref_roi_lo,
+                             m_ref_roi_hi,
+                             m_pedestal, pdim);
+
+    sigd = make_ndarray<double>(m_sig.shape()[0]);
+    refd = make_ndarray<double>(m_sig.shape()[0]);
+  }
 
   //
   //  Correct projection for common mode found in sideband
@@ -630,89 +897,197 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
   }
 
   //
+  //  Correct full signal/reference for common mode found in sideband
+  //
+  if (m_sb_full.size()) {
+    psalg::rolling_average(m_sb_full, m_sb_avg_full, m_sb_convergence);
+
+    ndarray<const double,2> sbc = psalg::commonModeLROE(m_sb_full, m_sb_avg_full);
+
+    if (m_use_ref_roi)
+      for(unsigned i=0; i<m_sig_full.shape()[0]; i++) {
+        for(unsigned j=0; j<m_sig_full.shape()[1]; j++) {
+          sigd_full(i,j) = double(m_sig_full(i,j))-sbc(i,j);
+          refd_full(i,j) = double(m_ref_full(i,j))-sbc(i,j);
+        }
+      }
+    else
+      for(unsigned i=0; i<m_sig_full.shape()[0]; i++)
+        for(unsigned j=0; j<m_sig_full.shape()[1]; j++)
+          sigd_full(i,j) = double(m_sig_full(i,j))-sbc(i,j);
+  }
+  else {
+    if (m_use_ref_roi)
+      for(unsigned i=0; i<m_sig_full.shape()[0]; i++) {
+        for(unsigned j=0; j<m_sig_full.shape()[1]; j++) {
+          sigd_full(i,j) = double(m_sig_full(i,j));
+          refd_full(i,j) = double(m_ref_full(i,j));
+        }
+      }
+    else
+      for(unsigned i=0; i<m_sig_full.shape()[0]; i++)
+        for(unsigned j=0; j<m_sig_full.shape()[1]; j++)
+          sigd_full(i,j) = double(m_sig_full(i,j));
+  }
+
+  //
   //  Require projection has a minimum amplitude (else no laser)
   //
   bool lcut=true;
-  for(unsigned i=0; i<sigd.shape()[0]; i++)
-    if (sigd[i]>m_proj_cut)
-      lcut=false;
+  if (m_use_full_roi) {
+    for(unsigned i=0; i<sigd_full.shape()[0]; i++)
+      for(unsigned j=0; j<sigd_full.shape()[1]; j++)
+        if (sigd_full(i,j)>m_proj_cut)
+          lcut=false;
+  } else {
+    for(unsigned i=0; i<sigd.shape()[0]; i++)
+      if (sigd[i]>m_proj_cut)
+        lcut=false;
+  }
 
   if (lcut) { _cut[PROJCUT]++; return; }
 
+  //
+  //  create projections for sig and ref if using non-projected
+  //
+  if (m_use_full_roi) {
+    sigd = psalg::project(sigd_full, 0.0, pdim);
+
+    if (m_use_ref_roi)
+      refd = psalg::project(refd_full, 0.0, pdim);
+  }
+
   if (nobeam) {
     _monitor_ref_sig( m_use_ref_roi ? refd:sigd );
-    psalg::rolling_average(ndarray<const double,1>(m_use_ref_roi ? refd:sigd),
-                           m_ref_avg, m_ref_convergence);
+    if (m_use_full_roi) {
+      _monitor_ref_sig_full( m_use_ref_roi ? refd_full:sigd_full );
+      psalg::rolling_average(ndarray<const double,2>(m_use_ref_roi ? refd_full:sigd_full),
+                             m_ref_avg_full, m_ref_convergence);
+    } else {
+      psalg::rolling_average(ndarray<const double,1>(m_use_ref_roi ? refd:sigd),
+                             m_ref_avg, m_ref_convergence);
+    }
     _cut[NOBEAM]++;
     return;
   }
   else if (m_use_ref_roi) {
     _monitor_ref_sig( refd );
-    psalg::rolling_average(ndarray<const double,1>(refd),
-                           m_ref_avg, m_ref_convergence);
+    if (m_use_full_roi) {
+      _monitor_ref_sig_full( refd_full );
+      psalg::rolling_average(ndarray<const double,2>(refd_full),
+                             m_ref_avg_full, m_ref_convergence);
+    } else {
+      psalg::rolling_average(ndarray<const double,1>(refd),
+                             m_ref_avg, m_ref_convergence);
+    }
   }
 
   _monitor_raw_sig( sigd );
+  if (m_use_full_roi)
+    _monitor_raw_sig_full( sigd_full );
 
-  if (m_ref_avg.size()==0) {
+  if ((m_use_full_roi ? m_ref_avg_full.size() : m_ref_avg.size()) == 0) {
     _cut[NOREF]++;
     return;
+  } else {
   }
 
   //
   //  Divide by the reference
   //
-  for(unsigned i=0; i<sigd.shape()[0]; i++)
-    sigd[i] = sigd[i]/m_ref_avg[i] - 1;
+  if (m_use_full_roi) {
+    for(unsigned i=0; i<sigd_full.shape()[0]; i++)
+      for(unsigned j=0; j<sigd_full.shape()[1]; j++)
+        sigd_full(i,j) = sigd_full(i,j)/m_ref_avg_full(i,j) - m_ref_offset;
+    _monitor_sub_sig_full( sigd_full );
+    // update the signal projection a final time
+    sigd = psalg::project(sigd_full, 0.0, pdim);
+  } else {
+    for(unsigned i=0; i<sigd.shape()[0]; i++)
+      sigd[i] = sigd[i]/m_ref_avg[i] - m_ref_offset;
+  }
 
   _monitor_sub_sig( sigd );
 
-  //
-  //  Apply the digital filter
-  //
-  ndarray<double,1> qwf = psalg::finite_impulse_response(m_weights,sigd);
+  if (m_use_fit) {
+    double chisq = 0.;
+    ndarray<double,1> params = make_ndarray<double>(Fitter::nparams);
+    ndarray<double,1> errors = make_ndarray<double>(Fitter::nparams);
+    ndarray<double,1> qwf = make_ndarray<double>(sigd.size());
 
-  _monitor_flt_sig( qwf );
+    bool converged = _fitter->fit(sigd, params, errors, chisq);
 
-  //
-  //  Find the two highest peaks that are well-separated
-  //
-  const double afrac = 0.50;
-  std::list<unsigned> peaks =
-    psalg::find_peaks(qwf, afrac, 2);
+    for (unsigned i=0; i<qwf.size(); i++) {
+      qwf[i] = Fitter::erf(i, params[0], params[1], params[2], params[3]);
+    }
 
-  unsigned nfits = peaks.size();
-  if (nfits>0) {
-    unsigned ix = *peaks.begin();
-    ndarray<double,1> pFit0 = psalg::parab_fit(qwf,ix,0.8);
-    if (pFit0[2]>0) {
-      double   xflt = pFit0[1]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+    _monitor_flt_sig( qwf );
+    if (converged) {
+      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
 
       double  xfltc = 0;
       for(unsigned i=m_calib_poly.size(); i!=0; )
         xfltc = xfltc*xflt + m_calib_poly[--i];
 
-      _amplitude = pFit0[0];
-      _flt_position  = xflt;
-      _flt_position_ps  = xfltc;
-      _flt_fwhm      = pFit0[2];
-      _ref_amplitude = m_ref_avg[ix];
+      _amplitude = params[0];
+      _flt_position = xflt;
+      _flt_position_ps = xfltc;
+      _flt_fwhm = params[1];
+      _ref_amplitude = params[3];
+      _nxt_amplitude = chisq;
+    } else {
+      _cut[NOFITS]++;
+    }
+  } else {
+    //
+    //  Apply the digital filter
+    //
+    ndarray<double,1> qwf = psalg::finite_impulse_response(m_weights,sigd);
 
-      if (nfits>1) {
-        ndarray<double,1> pFit1 =
-          psalg::parab_fit(qwf,*(++peaks.begin()),0.8);
-        if (pFit1[2]>0)
-          _nxt_amplitude = pFit1[0];
+    _monitor_flt_sig( qwf );
+
+    //
+    //  Find the two highest peaks that are well-separated
+    //
+    const double afrac = 0.50;
+    std::list<unsigned> peaks =
+      psalg::find_peaks(qwf, afrac, 2);
+
+    unsigned nfits = peaks.size();
+    if (nfits>0) {
+      unsigned ix = *peaks.begin();
+      ndarray<double,1> pFit0 = psalg::parab_fit(qwf,ix,0.8);
+      if (pFit0[2]>0) {
+        double   xflt = pFit0[1]+m_sig_roi_lo[pdim]+m_frame_roi[pdim]+m_flt_offset;
+
+        double  xfltc = 0;
+        for(unsigned i=m_calib_poly.size(); i!=0; )
+          xfltc = xfltc*xflt + m_calib_poly[--i];
+
+        _amplitude = pFit0[0];
+        _flt_position  = xflt;
+        _flt_position_ps  = xfltc;
+        _flt_fwhm      = pFit0[2];
+        _ref_amplitude = m_use_full_roi ?
+          psalg::project(m_ref_avg_full,0.0,pdim)[ix] :
+          m_ref_avg[ix];
+
+        if (nfits>1) {
+          ndarray<double,1> pFit1 =
+            psalg::parab_fit(qwf,*(++peaks.begin()),0.8);
+          if (pFit1[2]>0)
+            _nxt_amplitude = pFit1[0];
+        }
       }
     }
+    else
+      _cut[NOFITS]++;
   }
-  else
-    _cut[NOFITS]++;
 }
 
 void Fex::analyze(EventType etype,
                   const ndarray<const int,1>& signal,
-                  const ndarray<const int,1>& sideband) 
+                  const ndarray<const int,1>& sideband)
 {
   _cut[NCALLS]++;
 
@@ -721,7 +1096,7 @@ void Fex::analyze(EventType etype,
   bool nobeam    = (etype == Reference);
 
 #ifdef DBUG
-  printf("beam %c  laser %c\n", 
+  printf("beam %c  laser %c\n",
          nobeam ? 'F':'T', nolaser ? 'F':'T');
 #endif
 
@@ -732,7 +1107,7 @@ void Fex::analyze(EventType etype,
   unsigned pdim = m_projectX ? 1:0;
   m_sig = signal;
   m_sb  = sideband;
-  
+
   ndarray<double,1> sigd = make_ndarray<double>(m_sig.shape()[0]);
 
   //
@@ -780,58 +1155,87 @@ void Fex::analyze(EventType etype,
   //  Divide by the reference
   //
   for(unsigned i=0; i<sigd.shape()[0]; i++)
-    sigd[i] = sigd[i]/m_ref_avg[i] - 1;
+    sigd[i] = sigd[i]/m_ref_avg[i] - m_ref_offset;
 
   _monitor_sub_sig( sigd );
 
-  //
-  //  Apply the digital filter
-  //
-  ndarray<double,1> qwf = psalg::finite_impulse_response(m_weights,sigd);
+  if (m_use_fit) {
+    double chisq = 0.;
+    ndarray<double,1> params = make_ndarray<double>(Fitter::nparams);
+    ndarray<double,1> errors = make_ndarray<double>(Fitter::nparams);
+    ndarray<double,1> qwf = make_ndarray<double>(sigd.size());
 
-  _monitor_flt_sig( qwf );
+    bool converged = _fitter->fit(sigd, params, errors, chisq);
 
-  //
-  //  Find the two highest peaks that are well-separated
-  //
-  const double afrac = 0.50;
-  std::list<unsigned> peaks =
-    psalg::find_peaks(qwf, afrac, 2);
+    for (unsigned i=0; i<qwf.size(); i++) {
+      qwf[i] = Fitter::erf(i, params[0], params[1], params[2], params[3]);
+    }
 
-  unsigned nfits = peaks.size();
-  if (nfits>0) {
-    unsigned ix = *peaks.begin();
-    ndarray<double,1> pFit0 = psalg::parab_fit(qwf,ix,0.8);
-    if (pFit0[2]>0) {
-      double   xflt = pFit0[1]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+    _monitor_flt_sig( qwf );
+    if (converged) {
+      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
 
       double  xfltc = 0;
       for(unsigned i=m_calib_poly.size(); i!=0; )
         xfltc = xfltc*xflt + m_calib_poly[--i];
 
-      _amplitude = pFit0[0];
-      _flt_position  = xflt;
-      _flt_position_ps  = xfltc;
-      _flt_fwhm      = pFit0[2];
-      _ref_amplitude = m_ref_avg[ix];
+      _amplitude = params[0];
+      _flt_position = xflt;
+      _flt_position_ps = xfltc;
+      _flt_fwhm = params[1];
+      _ref_amplitude = params[3];
+      _nxt_amplitude = chisq;
+    } else {
+      _cut[NOFITS]++;
+    }
+  } else {
+    //
+    //  Apply the digital filter
+    //
+    ndarray<double,1> qwf = psalg::finite_impulse_response(m_weights,sigd);
 
-      if (nfits>1) {
-        ndarray<double,1> pFit1 =
-          psalg::parab_fit(qwf,*(++peaks.begin()),0.8);
-        if (pFit1[2]>0)
-          _nxt_amplitude = pFit1[0];
+    _monitor_flt_sig( qwf );
+
+    //
+    //  Find the two highest peaks that are well-separated
+    //
+    const double afrac = 0.50;
+    std::list<unsigned> peaks =
+      psalg::find_peaks(qwf, afrac, 2);
+
+    unsigned nfits = peaks.size();
+    if (nfits>0) {
+      unsigned ix = *peaks.begin();
+      ndarray<double,1> pFit0 = psalg::parab_fit(qwf,ix,0.8);
+      if (pFit0[2]>0) {
+        double   xflt = pFit0[1]+m_sig_roi_lo[pdim]+m_frame_roi[pdim]+m_flt_offset;
+
+        double  xfltc = 0;
+        for(unsigned i=m_calib_poly.size(); i!=0; )
+          xfltc = xfltc*xflt + m_calib_poly[--i];
+
+        _amplitude = pFit0[0];
+        _flt_position  = xflt;
+        _flt_position_ps  = xfltc;
+        _flt_fwhm      = pFit0[2];
+        _ref_amplitude = m_ref_avg[ix];
+
+        if (nfits>1) {
+          ndarray<double,1> pFit1 =
+            psalg::parab_fit(qwf,*(++peaks.begin()),0.8);
+          if (pFit1[2]>0)
+            _nxt_amplitude = pFit1[0];
+        }
       }
     }
+    else
+      _cut[NOFITS]++;
   }
-  else
-    _cut[NOFITS]++;
 }
 
-
 void Fex::analyze(EventType etype,
-                  const ndarray<const int,1>& signal,
-                  const ndarray<const int,1>& sideband, 
-                  const ndarray<const int,1>& reference) 
+                  const ndarray<const int,2>& signal,
+                  const ndarray<const int,2>& sideband)
 {
   _cut[NCALLS]++;
 
@@ -840,7 +1244,167 @@ void Fex::analyze(EventType etype,
   bool nobeam    = (etype == Reference);
 
 #ifdef DBUG
-  printf("beam %c  laser %c\n", 
+  printf("beam %c  laser %c\n",
+         nobeam ? 'F':'T', nolaser ? 'F':'T');
+#endif
+
+  if (nolaser) { _cut[NOLASER]++; return; }
+
+  if (!signal.size()) { _cut[FRAMESIZE]++; return; }
+
+  unsigned pdim = m_projectX ? 1:0;
+  m_sig_full = signal;
+  m_sb_full  = sideband;
+
+  ndarray<double,2> sigd_full = make_ndarray<double>(m_sig_full.shape()[0],m_sig_full.shape()[1]);
+
+  //
+  //  Correct projection for common mode found in sideband
+  //
+  if (m_sb.size()) {
+    psalg::rolling_average(m_sb_full, m_sb_avg_full, m_sb_convergence);
+
+    ndarray<const double,2> sbc = psalg::commonModeLROE(m_sb_full, m_sb_avg_full);
+
+    for(unsigned i=0; i<m_sig_full.shape()[0]; i++)
+      for(unsigned j=0; j<m_sig_full.shape()[1]; j++)
+        sigd_full(i,j) = double(m_sig_full(i,j))-sbc(i,j);
+  }
+  else {
+    for(unsigned i=0; i<m_sig_full.shape()[0]; i++)
+      for(unsigned j=0; j<m_sig_full.shape()[1]; j++)
+        sigd_full(i,j) = double(m_sig_full(i,j));
+  }
+
+  //
+  //  Require projection has a minimum amplitude (else no laser)
+  //
+  bool lcut=true;
+  for(unsigned i=0; i<sigd_full.shape()[0]; i++)
+    for(unsigned j=0; j<m_sig_full.shape()[1]; j++)
+      if (sigd_full(i,j)>m_proj_cut)
+        lcut=false;
+
+  if (lcut) { _cut[PROJCUT]++; return; }
+
+  ndarray<double,1> sigd = psalg::project(sigd_full, 0.0, pdim);
+
+  if (nobeam) {
+    _monitor_ref_sig( sigd );
+    _monitor_ref_sig_full( sigd_full );
+    psalg::rolling_average(ndarray<const double,2>(sigd_full),
+                           m_ref_avg_full, m_ref_convergence);
+    _cut[NOBEAM]++;
+    return;
+  }
+
+  _monitor_raw_sig ( sigd );
+  _monitor_raw_sig_full( sigd_full );
+
+  if (m_ref_avg_full.size()==0) {
+    _cut[NOREF]++;
+    return;
+  }
+
+  //
+  //  Divide by the reference
+  //
+  for(unsigned i=0; i<sigd_full.shape()[0]; i++)
+    for(unsigned j=0; j<sigd_full.shape()[1]; j++)
+      sigd_full(i,j) = sigd_full(i,j)/m_ref_avg_full(i,j) - m_ref_offset;
+
+  sigd = psalg::project(sigd_full, 0.0, pdim);
+
+  _monitor_sub_sig( sigd );
+  _monitor_sub_sig_full( sigd_full );
+
+  if (m_use_fit) {
+    double chisq = 0.;
+    ndarray<double,1> params = make_ndarray<double>(Fitter::nparams);
+    ndarray<double,1> errors = make_ndarray<double>(Fitter::nparams);
+    ndarray<double,1> qwf = make_ndarray<double>(sigd.size());
+
+    bool converged = _fitter->fit(sigd, params, errors, chisq);
+
+    for (unsigned i=0; i<qwf.size(); i++) {
+      qwf[i] = Fitter::erf(i, params[0], params[1], params[2], params[3]);
+    }
+
+    _monitor_flt_sig( qwf );
+    if (converged) {
+      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+
+      double  xfltc = 0;
+      for(unsigned i=m_calib_poly.size(); i!=0; )
+        xfltc = xfltc*xflt + m_calib_poly[--i];
+
+      _amplitude = params[0];
+      _flt_position = xflt;
+      _flt_position_ps = xfltc;
+      _flt_fwhm = params[1];
+      _ref_amplitude = params[3];
+      _nxt_amplitude = chisq;
+    } else {
+      _cut[NOFITS]++;
+    }
+  } else {
+    //
+    //  Apply the digital filter
+    //
+    ndarray<double,1> qwf = psalg::finite_impulse_response(m_weights,sigd);
+
+    _monitor_flt_sig( qwf );
+
+    //
+    //  Find the two highest peaks that are well-separated
+    //
+    const double afrac = 0.50;
+    std::list<unsigned> peaks =
+      psalg::find_peaks(qwf, afrac, 2);
+
+    unsigned nfits = peaks.size();
+    if (nfits>0) {
+      unsigned ix = *peaks.begin();
+      ndarray<double,1> pFit0 = psalg::parab_fit(qwf,ix,0.8);
+      if (pFit0[2]>0) {
+        double   xflt = pFit0[1]+m_sig_roi_lo[pdim]+m_frame_roi[pdim]+m_flt_offset;
+
+        double  xfltc = 0;
+        for(unsigned i=m_calib_poly.size(); i!=0; )
+          xfltc = xfltc*xflt + m_calib_poly[--i];
+
+        _amplitude = pFit0[0];
+        _flt_position  = xflt;
+        _flt_position_ps  = xfltc;
+        _flt_fwhm      = pFit0[2];
+        _ref_amplitude = psalg::project(m_ref_avg_full,0.0,pdim)[ix];
+
+        if (nfits>1) {
+          ndarray<double,1> pFit1 =
+            psalg::parab_fit(qwf,*(++peaks.begin()),0.8);
+          if (pFit1[2]>0)
+            _nxt_amplitude = pFit1[0];
+        }
+      }
+    }
+    else
+      _cut[NOFITS]++;
+  }
+}
+
+void Fex::analyze(EventType etype,
+                  const ndarray<const int,1>& signal,
+                  const ndarray<const int,1>& sideband,
+                  const ndarray<const int,1>& reference)
+{
+  _cut[NCALLS]++;
+
+  bool nolaser   = (etype == Dark);
+
+  bool nobeam    = (etype == Reference);
+
+#ifdef DBUG
+  printf("beam %c  laser %c\n",
          nobeam ? 'F':'T', nolaser ? 'F':'T');
 #endif
 
@@ -905,62 +1469,262 @@ void Fex::analyze(EventType etype,
   //  Divide by the reference
   //
   for(unsigned i=0; i<sigd.shape()[0]; i++)
-    sigd[i] = sigd[i]/m_ref_avg[i] - 1;
+    sigd[i] = sigd[i]/m_ref_avg[i] - m_ref_offset;
 
   _monitor_sub_sig( sigd );
 
-  //
-  //  Apply the digital filter
-  //
-  ndarray<double,1> qwf = psalg::finite_impulse_response(m_weights,sigd);
+  if (m_use_fit) {
+    double chisq = 0.;
+    ndarray<double,1> params = make_ndarray<double>(Fitter::nparams);
+    ndarray<double,1> errors = make_ndarray<double>(Fitter::nparams);
+    ndarray<double,1> qwf = make_ndarray<double>(sigd.size());
 
-  _monitor_flt_sig( qwf );
+    bool converged = _fitter->fit(sigd, params, errors, chisq);
 
-  //
-  //  Find the two highest peaks that are well-separated
-  //
-  const double afrac = 0.50;
-  std::list<unsigned> peaks =
-    psalg::find_peaks(qwf, afrac, 2);
+    for (unsigned i=0; i<qwf.size(); i++) {
+      qwf[i] = Fitter::erf(i, params[0], params[1], params[2], params[3]);
+    }
 
-  unsigned nfits = peaks.size();
-  if (nfits>0) {
-    unsigned ix = *peaks.begin();
-    ndarray<double,1> pFit0 = psalg::parab_fit(qwf,ix,0.8);
-    if (pFit0[2]>0) {
-      double   xflt = pFit0[1]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+    _monitor_flt_sig( qwf );
+    if (converged) {
+      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
 
       double  xfltc = 0;
       for(unsigned i=m_calib_poly.size(); i!=0; )
         xfltc = xfltc*xflt + m_calib_poly[--i];
 
-      _amplitude = pFit0[0];
-      _flt_position  = xflt;
-      _flt_position_ps  = xfltc;
-      _flt_fwhm      = pFit0[2];
-      _ref_amplitude = m_ref_avg[ix];
+      _amplitude = params[0];
+      _flt_position = xflt;
+      _flt_position_ps = xfltc;
+      _flt_fwhm = params[1];
+      _ref_amplitude = params[3];
+      _nxt_amplitude = chisq;
+    } else {
+      _cut[NOFITS]++;
+    }
+  } else {
+    //
+    //  Apply the digital filter
+    //
+    ndarray<double,1> qwf = psalg::finite_impulse_response(m_weights,sigd);
 
-      if (nfits>1) {
-        ndarray<double,1> pFit1 =
-          psalg::parab_fit(qwf,*(++peaks.begin()),0.8);
-        if (pFit1[2]>0)
-          _nxt_amplitude = pFit1[0];
+    _monitor_flt_sig( qwf );
+
+    //
+    //  Find the two highest peaks that are well-separated
+    //
+    const double afrac = 0.50;
+    std::list<unsigned> peaks =
+      psalg::find_peaks(qwf, afrac, 2);
+
+    unsigned nfits = peaks.size();
+    if (nfits>0) {
+      unsigned ix = *peaks.begin();
+      ndarray<double,1> pFit0 = psalg::parab_fit(qwf,ix,0.8);
+      if (pFit0[2]>0) {
+        double   xflt = pFit0[1]+m_sig_roi_lo[pdim]+m_frame_roi[pdim]+m_flt_offset;
+
+        double  xfltc = 0;
+        for(unsigned i=m_calib_poly.size(); i!=0; )
+          xfltc = xfltc*xflt + m_calib_poly[--i];
+
+        _amplitude = pFit0[0];
+        _flt_position  = xflt;
+        _flt_position_ps  = xfltc;
+        _flt_fwhm      = pFit0[2];
+        _ref_amplitude = m_ref_avg[ix];
+
+        if (nfits>1) {
+          ndarray<double,1> pFit1 =
+            psalg::parab_fit(qwf,*(++peaks.begin()),0.8);
+          if (pFit1[2]>0)
+            _nxt_amplitude = pFit1[0];
+        }
+      }
+    }
+    else
+      _cut[NOFITS]++;
+  }
+}
+
+void Fex::analyze(EventType etype,
+                  const ndarray<const int,2>& signal,
+                  const ndarray<const int,2>& sideband,
+                  const ndarray<const int,2>& reference)
+{
+  _cut[NCALLS]++;
+
+  bool nolaser   = (etype == Dark);
+
+  bool nobeam    = (etype == Reference);
+
+#ifdef DBUG
+  printf("beam %c  laser %c\n",
+         nobeam ? 'F':'T', nolaser ? 'F':'T');
+#endif
+
+  if (nolaser) { _cut[NOLASER]++; return; }
+
+  if (!signal.size()) { _cut[FRAMESIZE]++; return; }
+
+  unsigned pdim = m_projectX ? 1:0;
+  m_sig_full = signal;
+  m_sb_full  = sideband;
+  m_ref_full = reference;
+
+  ndarray<double,2> sigd_full = make_ndarray<double>(m_sig_full.shape()[0],m_sig_full.shape()[1]);
+  ndarray<double,2> refd_full = make_ndarray<double>(m_sig_full.shape()[0],m_sig_full.shape()[1]);
+
+  //
+  //  Correct projection for common mode found in sideband
+  //
+  if (m_sb_full.size()) {
+    psalg::rolling_average(m_sb_full, m_sb_avg_full, m_sb_convergence);
+
+    ndarray<const double,2> sbc = psalg::commonModeLROE(m_sb_full, m_sb_avg_full);
+
+    for(unsigned i=0; i<m_sig_full.shape()[0]; i++) {
+      for(unsigned j=0; j<m_sig_full.shape()[1]; j++) {
+        sigd_full(i,j) = double(m_sig_full(i,j))-sbc(i,j);
+        refd_full(i,j) = double(m_ref_full(i,j))-sbc(i,j);
       }
     }
   }
-  else
-    _cut[NOFITS]++;
+  else {
+    for(unsigned i=0; i<m_sig_full.shape()[0]; i++) {
+      for(unsigned j=0; j<m_sig_full.shape()[1]; j++) {
+        sigd_full(i,j) = double(m_sig_full(i,j));
+        refd_full(i,j) = double(m_sig_full(i,j));
+      }
+    }
+  }
+
+  //
+  //  Require projection has a minimum amplitude (else no laser)
+  //
+  bool lcut=true;
+  for(unsigned i=0; i<sigd_full.shape()[0]; i++) {
+    for(unsigned j=0; j<sigd_full.shape()[1]; j++) {
+    if (sigd_full(i,j)>m_proj_cut)
+      lcut=false;
+    }
+  }
+
+  if (lcut) { _cut[PROJCUT]++; return; }
+
+  ndarray<double,1> sigd = psalg::project(sigd_full, 0.0, pdim);
+  ndarray<double,1> refd = psalg::project(refd_full, 0.0, pdim);
+
+  if (nobeam) {
+    _monitor_ref_sig( refd );
+    _monitor_ref_sig_full( refd_full );
+    psalg::rolling_average(ndarray<const double,2>(refd_full),
+                           m_ref_avg_full, m_ref_convergence);
+    _cut[NOBEAM]++;
+    return;
+  }
+
+  _monitor_raw_sig( sigd );
+  _monitor_raw_sig_full( sigd_full );
+
+  if (m_ref_avg_full.size()==0) {
+    _cut[NOREF]++;
+    return;
+  }
+
+  //
+  //  Divide by the reference
+  //
+  for(unsigned i=0; i<sigd_full.shape()[0]; i++)
+    for(unsigned j=0; j<sigd_full.shape()[1]; j++)
+      sigd_full(i,j) = sigd_full(i,j)/m_ref_avg_full(i,j) - m_ref_offset;
+
+  sigd = psalg::project(sigd_full, 0.0, pdim);
+
+  _monitor_sub_sig( sigd );
+  _monitor_sub_sig_full( sigd_full );
+
+  if (m_use_fit) {
+    double chisq = 0.;
+    ndarray<double,1> params = make_ndarray<double>(Fitter::nparams);
+    ndarray<double,1> errors = make_ndarray<double>(Fitter::nparams);
+    ndarray<double,1> qwf = make_ndarray<double>(sigd.size());
+
+    bool converged = _fitter->fit(sigd, params, errors, chisq);
+
+    for (unsigned i=0; i<qwf.size(); i++) {
+      qwf[i] = Fitter::erf(i, params[0], params[1], params[2], params[3]);
+    }
+
+    _monitor_flt_sig( qwf );
+    if (converged) {
+      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+
+      double  xfltc = 0;
+      for(unsigned i=m_calib_poly.size(); i!=0; )
+        xfltc = xfltc*xflt + m_calib_poly[--i];
+
+      _amplitude = params[0];
+      _flt_position = xflt;
+      _flt_position_ps = xfltc;
+      _flt_fwhm = params[1];
+      _ref_amplitude = params[3];
+      _nxt_amplitude = chisq;
+    } else {
+      _cut[NOFITS]++;
+    }
+  } else {
+    //
+    //  Apply the digital filter
+    //
+    ndarray<double,1> qwf = psalg::finite_impulse_response(m_weights,sigd);
+
+    _monitor_flt_sig( qwf );
+
+    //
+    //  Find the two highest peaks that are well-separated
+    //
+    const double afrac = 0.50;
+    std::list<unsigned> peaks =
+      psalg::find_peaks(qwf, afrac, 2);
+
+    unsigned nfits = peaks.size();
+    if (nfits>0) {
+      unsigned ix = *peaks.begin();
+      ndarray<double,1> pFit0 = psalg::parab_fit(qwf,ix,0.8);
+      if (pFit0[2]>0) {
+        double   xflt = pFit0[1]+m_sig_roi_lo[pdim]+m_frame_roi[pdim]+m_flt_offset;
+
+        double  xfltc = 0;
+        for(unsigned i=m_calib_poly.size(); i!=0; )
+          xfltc = xfltc*xflt + m_calib_poly[--i];
+
+        _amplitude = pFit0[0];
+        _flt_position  = xflt;
+        _flt_position_ps  = xfltc;
+        _flt_fwhm      = pFit0[2];
+        _ref_amplitude = psalg::project(m_ref_avg_full,0.0,pdim)[ix];
+
+        if (nfits>1) {
+          ndarray<double,1> pFit1 =
+            psalg::parab_fit(qwf,*(++peaks.begin()),0.8);
+          if (pFit1[2]>0)
+            _nxt_amplitude = pFit1[0];
+        }
+      }
+    }
+    else
+      _cut[NOFITS]++;
+  }
 }
 
-
-ndarray<double,1> load_reference(unsigned key, unsigned sz)
+ndarray<double,1> load_reference(unsigned key, unsigned sz, const char* dir)
 {
-  char buff[128];
+  char buff[PATH_MAX];
   ndarray<double,1> m_ref_avg;
 
   // Load reference
-  { const char* dir = getenv("HOME");
-    sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", key);
+  { sprintf(buff,"%s/timetool.ref.%08x", dir, key);
     std::vector<double> r;
     FILE* rf = fopen(buff,"r");
     if (rf) {
@@ -975,6 +1739,35 @@ ndarray<double,1> load_reference(unsigned key, unsigned sz)
       else {
         printf("Reference in %s size %zu does not match [%u]\n",
                buff, r.size(), sz);
+      }
+      fclose(rf);
+    }
+  }
+  return m_ref_avg;
+}
+
+ndarray<double,2> load_reference(unsigned key, unsigned row_sz, unsigned col_sz, const char* dir)
+{
+  char buff[PATH_MAX];
+  ndarray<double,2> m_ref_avg;
+
+  // Load reference
+  { sprintf(buff,"%s/timetool.ref.%08x", dir, key);
+    std::vector<double> r;
+    FILE* rf = fopen(buff,"r");
+    if (rf) {
+      float rv;
+      while( fscanf(rf,"%f",&rv)>0 )
+        r.push_back(rv);
+      if (r.size()==(row_sz*col_sz)) {
+        m_ref_avg = make_ndarray<double>(row_sz, col_sz);
+        for(unsigned i=0; i<row_sz; i++)
+          for(unsigned j=0; j<col_sz; j++)
+            m_ref_avg(i,j) = r[col_sz*i+j];
+      }
+      else {
+        printf("Reference in %s size %zu does not match [%u]\n",
+               buff, r.size(), row_sz*col_sz);
       }
       fclose(rf);
     }

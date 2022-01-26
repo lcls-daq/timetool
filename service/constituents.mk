@@ -3,6 +3,7 @@ libnames := ttsvc
 libsrcs_ttsvc := $(wildcard *.cc)
 libincs_ttsvc := pdsdata/include
 libincs_ttsvc += psalg/include ndarray/include boost/include
+libincs_ttsvc += gsl/include
 
 special_include_files := Fex.hh
 

@@ -108,7 +108,7 @@ void ConfigHandler::events(InDatagram* dg)
 
   if (_xtc.size()) {
     std::vector<unsigned> requested_codes;
-    TimeToolConfigType tmplate(4,4,256,8,64);
+    TimeToolConfigType tmplate(4,4,256,8,8,64);
     for(unsigned i=0; i<_xtc.size(); i++) {
       TimeToolCfgCache cache(_xtc[i].src,
 			     _xtc[i].contains,

@@ -1,4 +1,4 @@
-#include "TimeToolA.hh"
+#include "TimeToolC.hh"
 
 #include "pdsdata/xtc/TypeId.hh"
 #include "pdsdata/xtc/Xtc.hh"
@@ -84,7 +84,7 @@ static ndarray<const EvrData::FIFOEvent, 1> _trimfifoEvents(uint32_t fid, Pds::E
       ntrim++;
     }
   }
-
+ 
   ndarray<Pds::EvrData::FIFOEvent, 1> trim = make_ndarray<Pds::EvrData::FIFOEvent>(ntrim);
   for (unsigned n=0,m=0; n<evr->numFifoEvents(); n++) {
     if (fifo[n].timestampHigh() == fid) {
@@ -151,72 +151,108 @@ namespace Pds {
   };
 };
 
+Pds_TimeTool_event::TimeToolC::TimeToolC() :
+  _fex(NULL),
+  _ref_path(NULL),
+  _write_ref_auto(true),
+  _verbose(false)
+{}
 
-Pds_TimeTool_event::TimeToolA::TimeToolA() : _fex("timetool.input") {}
+Pds_TimeTool_event::TimeToolC::TimeToolC(const Pds::Src& src,
+                                         bool write_ref_auto,
+                                         bool verbose,
+                                         const char* ref_path) :
+  _src(src),
+  _fex(NULL),
+  _ref_path(ref_path),
+  _write_ref_auto(write_ref_auto),
+  _verbose(verbose)
+{}
 
-Pds_TimeTool_event::TimeToolA::~TimeToolA() {}
+Pds_TimeTool_event::TimeToolC::TimeToolC(const char* filename,
+                                         bool write_ref_auto,
+                                         bool verbose,
+                                         const char* ref_path) :
+  _fex(new ::TimeTool::Fex(filename, write_ref_auto, verbose, ref_path)),
+  _ref_path(ref_path),
+  _write_ref_auto(write_ref_auto),
+  _verbose(verbose)
+{}
 
-Transition* Pds_TimeTool_event::TimeToolA::transitions(Transition* tr) 
+Pds_TimeTool_event::TimeToolC::~TimeToolC()
+{
+  if (_fex) delete _fex;
+}
+
+Transition* Pds_TimeTool_event::TimeToolC::transitions(Transition* tr) 
 {
   if (tr->id()==TransitionId::Configure) {
-    _fex.configure();
+    if (_fex)
+      _fex->configure();
   }
   else if (tr->id()==TransitionId::Unconfigure) {
-    _fex.unconfigure();
+    if (_fex)
+      _fex->unconfigure();
   }
   return tr;
 }
 
-InDatagram* Pds_TimeTool_event::TimeToolA::events(InDatagram* dg) 
+InDatagram* Pds_TimeTool_event::TimeToolC::events(InDatagram* dg) 
 {
   const Src& src = reinterpret_cast<Xtc*>(dg->xtc.payload())->src;
 
   switch(dg->datagram().seq.service()) {
   case TransitionId::L1Accept:
     {
-      _fex.reset();
-      
-      _frame = 0;
-      _evrdata = 0;
-      _ipmdata = 0;
+      if (_fex) {
+        _fex->reset();
+        
+        _frame = 0;
+        _evrdata = 0;
+        _ipmdata = 0;
 
-      iterate(&dg->xtc);
+        iterate(&dg->xtc);
 
-      if (_frame && _evrdata) {
+        if (_frame && _evrdata) {
 
-        _fex.analyze(_frame->data16(),
-                     _trimfifoEvents(dg->datagram().seq.stamp().fiducials(),_evrdata),
-                     _ipmdata);
+          _fex->analyze(_frame->data16(),
+                        _trimfifoEvents(dg->datagram().seq.stamp().fiducials(),_evrdata),
+                        _ipmdata);
 
-        if (!_fex.write_image()) {
-          uint32_t* pdg = reinterpret_cast<uint32_t*>(&dg->xtc);
-	        FrameTrim iter(pdg);
-	        iter.process(&dg->xtc);
-	      }
+          if (!_fex->write_image()) {
+            uint32_t* pdg = reinterpret_cast<uint32_t*>(&dg->xtc);
+            FrameTrim iter(pdg);
+            iter.process(&dg->xtc);
+          }
+        }
+
+        Damage dmg(_fex->status() ? 0x4000 : 0);
+        
+        //  Remove the frame
+        //	  dg->datagram().xtc.extent = sizeof(Xtc);
+        
+        //  Insert the results
+        _insert_pv(dg, src, 0, _fex->amplitude());
+        _insert_pv(dg, src, 1, _fex->filtered_position ());
+        _insert_pv(dg, src, 2, _fex->filtered_pos_ps ());
+        _insert_pv(dg, src, 3, _fex->filtered_fwhm ());
+        _insert_pv(dg, src, 4, _fex->next_amplitude());
+        _insert_pv(dg, src, 5, _fex->ref_amplitude());
       }
-
-      Damage dmg(_fex.status() ? 0x4000 : 0);
-      
-      //  Remove the frame
-      //	  dg->datagram().xtc.extent = sizeof(Xtc);
-      
-      //  Insert the results
-      _insert_pv(dg, src, 0, _fex.amplitude());
-      _insert_pv(dg, src, 1, _fex.filtered_position ());
-      _insert_pv(dg, src, 2, _fex.filtered_pos_ps ());
-      _insert_pv(dg, src, 3, _fex.filtered_fwhm ());
-      _insert_pv(dg, src, 4, _fex.next_amplitude());
-      _insert_pv(dg, src, 5, _fex.ref_amplitude());
 
       break; }
   case TransitionId::Configure:
     {
-      _insert_pv(dg, src, 0, _fex.base_name()+":AMPL");
-      _insert_pv(dg, src, 1, _fex.base_name()+":FLTPOS");
-      _insert_pv(dg, src, 2, _fex.base_name()+":FLTPOS_PS");
-      _insert_pv(dg, src, 3, _fex.base_name()+":FLTPOSFWHM");
-      _insert_pv(dg, src, 4, _fex.base_name()+":AMPLNXT");
-      _insert_pv(dg, src, 5, _fex.base_name()+":REFAMPL");
+      iterate(&dg->xtc);
+
+      if (_fex) {
+        _insert_pv(dg, src, 0, _fex->base_name()+":AMPL");
+        _insert_pv(dg, src, 1, _fex->base_name()+":FLTPOS");
+        _insert_pv(dg, src, 2, _fex->base_name()+":FLTPOS_PS");
+        _insert_pv(dg, src, 3, _fex->base_name()+":FLTPOSFWHM");
+        _insert_pv(dg, src, 4, _fex->base_name()+":AMPLNXT");
+        _insert_pv(dg, src, 5, _fex->base_name()+":REFAMPL");
+      }
       break; }
   default:
     break;
@@ -225,12 +261,12 @@ InDatagram* Pds_TimeTool_event::TimeToolA::events(InDatagram* dg)
   return dg;
 }
 
-int Pds_TimeTool_event::TimeToolA::process(Xtc* xtc) 
+int Pds_TimeTool_event::TimeToolC::process(Xtc* xtc) 
 {
   if (xtc->contains.id()==TypeId::Id_Xtc) 
     iterate(xtc);
   else if (xtc->contains.id()==TypeId::Id_Frame && 
-	   xtc->src.phy() == _fex.src().phy()) {
+	   xtc->src.phy() == (_fex ? _fex->src().phy(): 0)) {
     if (xtc->contains.compressed()) {
       _pXtc = Pds::CompressedXtc::uncompress(*xtc);
       _frame = reinterpret_cast<Pds::Camera::FrameV1*>(_pXtc->payload());
@@ -241,9 +277,32 @@ int Pds_TimeTool_event::TimeToolA::process(Xtc* xtc)
   else if (xtc->contains.id()==Pds::TypeId::Id_EvrData) {
     _evrdata = reinterpret_cast<Pds::EvrData::DataV3*>(xtc->payload());
   }
-  else if (xtc->src.level()==_fex.m_ipm_get_key.level() && 
-	   xtc->src.phy  ()==_fex.m_ipm_get_key.phy  () &&
-	   xtc->contains.id  ()==Pds::TypeId::Id_IpmFex) {
+  else if (xtc->contains.id()==Pds::TypeId::Id_TimeToolConfig &&
+      xtc->src.phy() == _src.phy()) {
+    printf("Found conf\n");
+    switch (xtc->contains.version()) {
+      case 1:
+        { Pds::TimeTool::ConfigV1* cfg = 
+            reinterpret_cast<Pds::TimeTool::ConfigV1*>(xtc->payload());
+          _fex = new ::TimeTool::Fex(_src, *cfg, _write_ref_auto, _verbose, _ref_path); }
+        break;
+      case 2:
+        { Pds::TimeTool::ConfigV2* cfg = 
+            reinterpret_cast<Pds::TimeTool::ConfigV2*>(xtc->payload());
+          _fex = new ::TimeTool::Fex(_src, *cfg, _write_ref_auto, _verbose, _ref_path); }
+        break;
+      case 3:
+        { Pds::TimeTool::ConfigV3* cfg = 
+            reinterpret_cast<Pds::TimeTool::ConfigV3*>(xtc->payload());
+          _fex = new ::TimeTool::Fex(_src, *cfg, _write_ref_auto, _verbose, _ref_path); }
+        break;
+      default:
+        break;
+    }
+  }
+  else if (xtc->src.level()==(_fex ? _fex->m_ipm_get_key.level() : 0) && 
+	   xtc->src.phy()==(_fex ? _fex->m_ipm_get_key.phy() : 0) &&
+	   xtc->contains.id()==Pds::TypeId::Id_IpmFex) {
     _ipmdata = reinterpret_cast<Pds::Lusi::IpmFexV1*>(xtc->payload());
   }
   return 1;
@@ -253,6 +312,6 @@ int Pds_TimeTool_event::TimeToolA::process(Xtc* xtc)
 //  Plug-in module creator
 //
 
-extern "C" Appliance* create() { return new Pds_TimeTool_event::TimeToolA; }
+extern "C" Appliance* create() { return new Pds_TimeTool_event::TimeToolC; }
 
 extern "C" void destroy(Appliance* p) { delete p; }

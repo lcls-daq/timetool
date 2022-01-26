@@ -32,6 +32,7 @@
 
 #include "cadef.h"
 
+#include <limits.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string>
@@ -52,6 +53,13 @@ static void copy_projection(ndarray<const int,1> in,
                             ndarray<const int,1> out)
 {
   ndarray<int,1> a = make_ndarray<int>(const_cast<int*>(out.data()),out.shape()[0]);
+  std::copy(in.begin(),in.end(),a.begin());
+}
+
+static void copy_roi(ndarray<const int,2> in,
+                     ndarray<const int,2> out)
+{
+  ndarray<int,2> a = make_ndarray<int>(const_cast<int*>(out.data()),out.shape()[0],out.shape()[1]);
   std::copy(in.begin(),in.end(),a.begin());
 }
 
@@ -105,8 +113,10 @@ namespace Pds {
     Fex(const Src&, const TimeToolConfigType&);
     ~Fex();
   public:
-    void _monitor_raw_sig (const ndarray<const double,1>&);
-    void _monitor_ref_sig (const ndarray<const double,1>&);
+    void _monitor_raw_sig      (const ndarray<const double,1>&);
+    void _monitor_ref_sig      (const ndarray<const double,1>&);
+    void _monitor_raw_sig_full (const ndarray<const double,2>&);
+    void _monitor_ref_sig_full (const ndarray<const double,2>&);
     void _write_ref();
     void _enable_write_ref();
   public:
@@ -195,9 +205,15 @@ namespace Pds {
                                                                 fex.next_amplitude(),
                                                                 fex.ref_amplitude());
                 if (fex.write_projections()) {
-                  copy_projection(fex.m_sig, d.projected_signal   (fex.config()));
-                  copy_projection(fex.m_sb , d.projected_sideband (fex.config()));
-                  copy_projection(fex.m_ref, d.projected_reference(fex.config()));
+                  if (fex.use_full_roi()) {
+                    copy_roi(fex.m_sig_full, d.full_signal   (fex.config()));
+                    copy_roi(fex.m_sb_full , d.full_sideband (fex.config()));
+                    copy_roi(fex.m_ref_full, d.full_reference(fex.config()));
+                  } else {
+                    copy_projection(fex.m_sig, d.projected_signal   (fex.config()));
+                    copy_projection(fex.m_sb , d.projected_sideband (fex.config()));
+                    copy_projection(fex.m_ref, d.projected_reference(fex.config()));
+                  }
                 }
                 Xtc xtc(_timetoolDataType,src);
                 xtc.extent += TimeToolDataType::_sizeof(fex.config());
@@ -280,9 +296,11 @@ void Fex::reset()
 }
 
 typedef std::map<Pds::Src,ndarray<double,1> > MapType;
+typedef std::map<Pds::Src,ndarray<double,2> > FullMapType;
 
 static bool _ref_written=false;
 static MapType _ref;
+static FullMapType _ref_full;
 static Semaphore _sem(Semaphore::FULL);
 
 //
@@ -318,26 +336,75 @@ void Fex::_monitor_ref_sig (const ndarray<const double,1>& ref)
     _sem.give();
   }
 }
+
+void Fex::_monitor_raw_sig_full (const ndarray<const double,2>& a)
+{
+  _etype = TimeToolDataType::Signal;
+  FullMapType::iterator it = _ref_full.find(_src);
+  if (it != _ref_full.end()) {
+    if (m_ref_avg_full.size()!=it->second.size())
+      m_ref_avg_full = make_ndarray<double>(it->second.shape()[0],it->second.shape()[1]);
+    std::copy(it->second.begin(), it->second.end(), m_ref_avg_full.begin());
+  }
+}
+
+void Fex::_monitor_ref_sig_full (const ndarray<const double,2>& ref)
+{
+  _etype = TimeToolDataType::Reference;
+  FullMapType::iterator it = _ref_full.find(_src);
+  if (it == _ref_full.end()) {
+    ndarray<double,2> a = make_ndarray<double>(ref.shape()[0],ref.shape()[1]);
+    std::copy(ref.begin(), ref.end(), a.begin());
+    _sem.take();
+    _ref_full[_src] = a;
+    _sem.give();
+  }
+  else {
+    _sem.take();
+    psalg::rolling_average(ref, it->second, m_ref_convergence);
+    _sem.give();
+  }
+}
  
 void Fex::_write_ref()
 {
-  char buff[128];
+  char buff[PATH_MAX];
   const char* dir = getenv("HOME");
-  MapType::iterator it = _ref.find(_src);
-  if (it != _ref.end()) {
-    _sem.take();
-    if (!_ref_written) {
-      sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
-      FILE* f = fopen(buff,"w");
-      if (f) {
-        for(unsigned i=0; i<it->second.size(); i++)
-          fprintf(f," %f",it->second[i]);
-        fprintf(f,"\n");
-        fclose(f);
+  if (m_use_full_roi) {
+    FullMapType::iterator it = _ref_full.find(_src);
+    if (it != _ref_full.end()) {
+      _sem.take();
+      if (!_ref_written) {
+        sprintf(buff,"%s/timetool.ref.%08x", _ref_path.c_str(), m_get_key);
+        FILE* f = fopen(buff,"w");
+        if (f) {
+          for(unsigned i=0; i<it->second.shape()[0]; i++)
+            for(unsigned j=0; j<it->second.shape()[1]; j++)
+              fprintf(f," %f",it->second(i,j));
+          fprintf(f,"\n");
+          fclose(f);
+        }
+        _ref_written=true;
       }
-      _ref_written=true;
+      _sem.give();
     }
-    _sem.give();
+  } else {
+    MapType::iterator it = _ref.find(_src);
+    if (it != _ref.end()) {
+      _sem.take();
+      if (!_ref_written) {
+        sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
+        FILE* f = fopen(buff,"w");
+        if (f) {
+          for(unsigned i=0; i<it->second.size(); i++)
+            fprintf(f," %f",it->second[i]);
+          fprintf(f,"\n");
+          fclose(f);
+        }
+        _ref_written=true;
+      }
+      _sem.give();
+    }
   }
 }
 
