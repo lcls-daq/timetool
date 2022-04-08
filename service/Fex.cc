@@ -135,7 +135,7 @@ Fex::Fex(const Pds::Src& src,
   m_weights = make_ndarray<double>(cfg.number_of_weights());
   std::copy(cfg.weights().begin(), cfg.weights().end(), m_weights.data());
 
-  _indicator_offset = -cfg.number_of_weights()/2;
+  _indicator_offset = m_use_fit ? 0 : -cfg.number_of_weights()/2;
 
   m_fit_max_iterations = 0;
   m_fit_weights_factor = 0.;
@@ -156,7 +156,7 @@ Fex::Fex(const Pds::Src& src,
 
   m_ref_offset = m_use_fit ? 0.0 : 1.0;
 
-  m_flt_offset = m_weights.size() / 2;
+  m_flt_offset = m_use_fit ? 0 : m_weights.size() / 2;
 
   m_ref_avg = load_reference(m_get_key,sz,_ref_path.c_str());
   m_sig  = ndarray<const int,1>();
@@ -252,7 +252,7 @@ Fex::Fex(const Pds::Src& src,
   m_weights = make_ndarray<double>(cfg.number_of_weights());
   std::copy(cfg.weights().begin(), cfg.weights().end(), m_weights.data());
 
-  _indicator_offset = -cfg.number_of_weights()/2;
+  _indicator_offset = m_use_fit ? 0 : -cfg.number_of_weights()/2;
 
   m_fit_max_iterations = 0;
   m_fit_weights_factor = 0.;
@@ -273,7 +273,7 @@ Fex::Fex(const Pds::Src& src,
 
   m_ref_offset = m_use_fit ? 0.0 : 1.0;
 
-  m_flt_offset = m_weights.size() / 2;
+  m_flt_offset = m_use_fit ? 0 : m_weights.size() / 2;
 
   m_ref_avg = load_reference(m_get_key,sz,_ref_path.c_str());
   m_sig = ndarray<const int,1>();
@@ -369,7 +369,7 @@ Fex::Fex(const Pds::Src& src,
   m_weights = make_ndarray<double>(cfg.number_of_weights());
   std::copy(cfg.weights().begin(), cfg.weights().end(), m_weights.data());
 
-  _indicator_offset = -cfg.number_of_weights()/2;
+  _indicator_offset = m_use_fit ? 0 : -cfg.number_of_weights()/2;
 
   m_fit_max_iterations = cfg.fit_max_iterations();
   m_fit_weights_factor = cfg.fit_weights_factor();
@@ -391,7 +391,7 @@ Fex::Fex(const Pds::Src& src,
 
   m_ref_offset = m_use_fit ? 0.0 : 1.0;
 
-  m_flt_offset = m_weights.size() / 2;
+  m_flt_offset = m_use_fit ? 0 : m_weights.size() / 2;
 
   const char* dir = _ref_path.c_str();
 
@@ -638,7 +638,7 @@ void Fex::configure()
 
   m_ref_offset = m_use_fit ? 0.0 : 1.0;
 
-  m_flt_offset = m_weights.size() / 2;
+  m_flt_offset = m_use_fit ? 0 : m_weights.size() / 2;
 
   const char* dir = _ref_path.c_str();
 
@@ -1036,7 +1036,7 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
 
     _monitor_flt_sig( qwf );
     if (converged) {
-      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim]+m_flt_offset;
 
       double  xfltc = 0;
       for(unsigned i=m_calib_poly.size(); i!=0; )
@@ -1186,7 +1186,7 @@ void Fex::analyze(EventType etype,
 
     _monitor_flt_sig( qwf );
     if (converged) {
-      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim]+m_flt_offset;
 
       double  xfltc = 0;
       for(unsigned i=m_calib_poly.size(); i!=0; )
@@ -1345,7 +1345,7 @@ void Fex::analyze(EventType etype,
 
     _monitor_flt_sig( qwf );
     if (converged) {
-      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim]+m_flt_offset;
 
       double  xfltc = 0;
       for(unsigned i=m_calib_poly.size(); i!=0; )
@@ -1500,7 +1500,7 @@ void Fex::analyze(EventType etype,
 
     _monitor_flt_sig( qwf );
     if (converged) {
-      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim]+m_flt_offset;
 
       double  xfltc = 0;
       for(unsigned i=m_calib_poly.size(); i!=0; )
@@ -1671,7 +1671,7 @@ void Fex::analyze(EventType etype,
 
     _monitor_flt_sig( qwf );
     if (converged) {
-      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim];
+      double xflt = params[2]+m_sig_roi_lo[pdim]+m_frame_roi[pdim]+m_flt_offset;
 
       double  xfltc = 0;
       for(unsigned i=m_calib_poly.size(); i!=0; )
