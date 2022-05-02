@@ -7,19 +7,22 @@
 
 #include "cadef.h"
 
+#include <string>
+
 using namespace Pds;
 using Pds_Epics::PVWriter;
 using ::TimeTool::ConfigCache;
 
 static bool _initialized=false;
 
-TimeToolEpics::TimeToolEpics() :
-  _pvts(0.0)
+Pds_TimeTool_event::TimeToolEpics::TimeToolEpics(const char* prefix) :
+  _pvts(0.0),
+  _prefix(prefix)
 {}
 
-TimeToolEpics::~TimeToolEpics() {}
+Pds_TimeTool_event::TimeToolEpics::~TimeToolEpics() {}
 
-Transition* TimeToolEpics::transitions(Transition* tr)
+Transition* Pds_TimeTool_event::TimeToolEpics::transitions(Transition* tr)
 {
   switch (tr->id()) {
   case TransitionId::Configure:
@@ -49,7 +52,7 @@ Transition* TimeToolEpics::transitions(Transition* tr)
   return tr;
 }
 
-InDatagram* TimeToolEpics::events     (InDatagram* dg)
+InDatagram* Pds_TimeTool_event::TimeToolEpics::events     (InDatagram* dg)
 {
   if (dg->seq.service()==TransitionId::Configure)
     iterate(&dg->xtc);
@@ -61,7 +64,7 @@ InDatagram* TimeToolEpics::events     (InDatagram* dg)
   return dg;
 }
 
-int TimeToolEpics::process(Xtc* xtc)
+int Pds_TimeTool_event::TimeToolEpics::process(Xtc* xtc)
 {
   switch(xtc->contains.id()) {
   case TypeId::Id_Xtc:
@@ -70,13 +73,19 @@ int TimeToolEpics::process(Xtc* xtc)
   case TypeId::Id_TimeToolConfig:
     { ConfigCache* cache = ConfigCache::instance(xtc->contains, xtc->payload());
       char buff[64];
-      sprintf(buff,"%s:TTALL", cache->base_name());
-      _cfgs[xtc->src.phy()] = cache;
-      _pvwri[xtc->src.phy()] = new PVWriter(buff);
+      if (cache) {
+        if (_prefix) {
+          sprintf(buff,"%s:%s:TTALL", _prefix, cache->base_name());
+        } else {
+          sprintf(buff,"%s:TTALL", cache->base_name());
+        }
+        _cfgs[xtc->src.phy()] = cache;
+        _pvwri[xtc->src.phy()] = new PVWriter(buff);
+      }
     } break;
   case TypeId::Id_TimeToolData:
     { ConfigCache* cache = _cfgs[xtc->src.phy()];
-      if (cache->data(xtc->contains, xtc->payload())) {
+      if (cache && cache->data(xtc->contains, xtc->payload())) {
         if (cache->is_signal()) {
           PVWriter* pvw = _pvwri[xtc->src.phy()];
           if (pvw->connected()) {
@@ -104,4 +113,3 @@ int TimeToolEpics::process(Xtc* xtc)
   }
   return 1;
 }
-

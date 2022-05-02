@@ -7,6 +7,7 @@
 #include <map>
 
 namespace Pds_Epics { class PVWriter; }
+namespace TimeTool { class ConfigCache; }
 
 namespace Pds {
   class TimeToolEpics : public Appliance,
@@ -21,6 +22,8 @@ namespace Pds {
     int         process    (Xtc*);
   private:
     std::map<uint32_t,Pds_Epics::PVWriter*> _pvwri;
+    std::map<uint32_t,TimeTool::ConfigCache*> _cfgs;
+    double _pvts;
   };
 };
 

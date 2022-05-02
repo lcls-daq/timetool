@@ -2,6 +2,7 @@
 #include "pds/service/CmdLineTools.hh"
 #include "pds/service/GenericPool.hh"
 #include "timetool/event/TimeToolC.hh"
+#include "timetool/event/TimeToolEpics.hh"
 #include "pdsdata/xtc/XtcFileIterator.hh"
 #include "pdsdata/xtc/Xtc.hh"
 #include "pdsdata/xtc/DetInfo.hh"
@@ -67,13 +68,14 @@ int main(int argc, char* argv[]) {
   const char* oname = 0;
   const char* path = 0;
   const char* refpath = 0;
+  const char* prefix = 0;
   unsigned run = 0;
   unsigned parseErr = 0;
   unsigned events = -1U;
   DetInfo detInfo(0, Pds::DetInfo::NumDetector, 0, DetInfo::Opal1000, 0);
   char dirpath[PATH_MAX];
   
-  while ((c = getopt(argc, argv, "dhvwn:o:p:r:i:f:R:")) != -1) {
+  while ((c = getopt(argc, argv, "dhvwn:o:p:r:i:f:R:e:")) != -1) {
     switch (c) {
     case 'd': debug = true; break;
     case 'h':
@@ -84,6 +86,9 @@ int main(int argc, char* argv[]) {
         printf("%s: option `-i' parsing error\n", argv[0]);
         parseErr++;
       }
+      break;
+    case 'e':
+      prefix = optarg;
       break;
     case 'f':
       fname = optarg;
@@ -152,6 +157,7 @@ int main(int argc, char* argv[]) {
   Pds_TimeTool_event::TimeToolC app = fname ?
     Pds_TimeTool_event::TimeToolC(fname, write_ref, verbose, refpath) :
     Pds_TimeTool_event::TimeToolC(detInfo, write_ref, verbose, refpath);
+  Pds_TimeTool_event::TimeToolEpics epics_app("TST:DAN");
   OWire owire;
   if (oname) owire.open(oname);
 
@@ -172,6 +178,9 @@ int main(int argc, char* argv[]) {
       switch (dg->seq.service()) {
       case Pds::TransitionId::L1Accept:
         app.events(cdg);
+        if (prefix) {
+          epics_app.events(cdg);
+        }
         owire.event(cdg,app.fex());
         ievent++;
         break;
@@ -179,6 +188,10 @@ int main(int argc, char* argv[]) {
         { Transition tr(dg->seq.service(),Transition::Execute,dg->seq,dg->env);
           app.transitions(&tr);
           app.events(cdg);
+          if (prefix) {
+            epics_app.transitions(&tr);
+            epics_app.events(cdg);
+          }
         } break;
       }
 
