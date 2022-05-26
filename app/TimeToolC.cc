@@ -369,7 +369,6 @@ void Fex::_monitor_ref_sig_full (const ndarray<const double,2>& ref)
 void Fex::_write_ref()
 {
   char buff[PATH_MAX];
-  const char* dir = getenv("HOME");
   if (m_use_full_roi) {
     FullMapType::iterator it = _ref_full.find(_src);
     if (it != _ref_full.end()) {
@@ -393,7 +392,7 @@ void Fex::_write_ref()
     if (it != _ref.end()) {
       _sem.take();
       if (!_ref_written) {
-        sprintf(buff,"%s/timetool.ref.%08x", dir ? dir : "/tmp", m_get_key);
+        sprintf(buff,"%s/timetool.ref.%08x", _ref_path.c_str(), m_get_key);
         FILE* f = fopen(buff,"w");
         if (f) {
           for(unsigned i=0; i<it->second.size(); i++)
