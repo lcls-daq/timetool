@@ -467,11 +467,19 @@ InDatagram* TimeToolC::events(InDatagram* dg)
       const Xtc& xtc = dg->datagram().xtc;
       uint32_t* v = reinterpret_cast<uint32_t*>(xtc.payload()+xtc.sizeofPayload());
       const std::vector<Pds::EvrData::FIFOEvent>& fifo = _evr[b];
-      v[0] = 0;
+      unsigned& n = *v;
+      n = 0;
       for(unsigned i=0; i<fifo.size(); i++) {
         if (fifo[i].timestampHigh() == fid) {
-          v[i+1] = fifo[i].eventCode();
-          v[0]++;
+          v[++n] = fifo[i].eventCode();
+        }
+        else {
+            printf("Dropping fifoEvent [%x] %x/%x/%x at %s line %d\n",
+                   fid,
+                   fifo[i].timestampHigh(),
+                   fifo[i].timestampLow(),
+                   fifo[i].eventCode(),
+                   __FILE__, __LINE__);
         }
       }
       _evr[b].clear();
