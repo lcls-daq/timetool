@@ -5,14 +5,13 @@
 #include "pdsdata/xtc/XtcIterator.hh"
 
 #include "timetool/service/Fex.hh"
+#include "timetool/service/FrameCache.hh"
 
 #include <boost/shared_ptr.hpp>
 
 namespace Pds { 
-  namespace Opal1k  { class ConfigV1; } 
   namespace EvrData { class DataV3; } 
   namespace Lusi    { class IpmFexV1; } 
-  namespace Camera  { class FrameV1; } 
 };
 
 namespace Pds_TimeTool_event {
@@ -37,7 +36,7 @@ namespace Pds_TimeTool_event {
   private:
     Pds::Src _src;
     ::TimeTool::Fex* _fex;
-    const Pds::Camera::FrameV1* _frame;
+    ::TimeTool::FrameCache* _frame;
     Pds::EvrData::DataV3* _evrdata;
     Pds::Lusi::IpmFexV1* _ipmdata;
     const char* _ref_path;
@@ -45,6 +44,7 @@ namespace Pds_TimeTool_event {
     bool      _verbose;
     bool      _bykik;
     bool      _no_laser;
+    bool      _use_xtc_cfg;
     boost::shared_ptr<Pds::Xtc> _pXtc;
   };
 };

@@ -10,9 +10,7 @@
 #include "pdsdata/xtc/DetInfo.hh"
 #include "pdsdata/xtc/ProcInfo.hh"
 
-#include "pdsdata/psddl/camera.ddl.h"
 #include "pdsdata/psddl/lusi.ddl.h"
-
 #include "pdsdata/psddl/epics.ddl.h"
 
 #include "pds/epicstools/PVWriter.hh"
@@ -24,7 +22,6 @@
 
 using std::string;
 
-typedef Pds::Opal1k::ConfigV1 Opal1kConfig;
 typedef Pds::EvrData::DataV3 EvrDataType;
 
 using namespace Pds;
@@ -152,16 +149,21 @@ namespace Pds {
 };
 
 
-Pds_TimeTool_event::TimeToolA::TimeToolA() : _fex("timetool.input") {}
+Pds_TimeTool_event::TimeToolA::TimeToolA() :
+  _fex("timetool.input"),
+  _frame(NULL)
+{
+  _fex.configure();
+}
 
-Pds_TimeTool_event::TimeToolA::~TimeToolA() {}
+Pds_TimeTool_event::TimeToolA::~TimeToolA()
+{
+  if (_frame) delete _frame;
+}
 
 Transition* Pds_TimeTool_event::TimeToolA::transitions(Transition* tr) 
 {
-  if (tr->id()==TransitionId::Configure) {
-    _fex.configure();
-  }
-  else if (tr->id()==TransitionId::Unconfigure) {
+  if (tr->id()==TransitionId::Unconfigure) {
     _fex.unconfigure();
   }
   return tr;
@@ -176,15 +178,16 @@ InDatagram* Pds_TimeTool_event::TimeToolA::events(InDatagram* dg)
     {
       _fex.reset();
       
-      _frame = 0;
+      if (_frame)
+        _frame->clear_frame();
       _evrdata = 0;
       _ipmdata = 0;
 
       iterate(&dg->xtc);
 
-      if (_frame && _evrdata) {
+      if (_frame && !_frame->empty() && _evrdata) {
 
-        _fex.analyze(_frame->data16(),
+        _fex.analyze(_frame->data(),
                      _trimfifoEvents(dg->datagram().seq.stamp().fiducials(),_evrdata),
                      _ipmdata);
 
@@ -229,17 +232,29 @@ int Pds_TimeTool_event::TimeToolA::process(Xtc* xtc)
 {
   if (xtc->contains.id()==TypeId::Id_Xtc) 
     iterate(xtc);
+  else if (xtc->contains.id()==TypeId::Id_VimbaFrame &&
+     xtc->src.phy() == _fex.src().phy()) {
+    _frame->set_frame(xtc->contains, xtc->payload());
+  }
   else if (xtc->contains.id()==TypeId::Id_Frame && 
 	   xtc->src.phy() == _fex.src().phy()) {
     if (xtc->contains.compressed()) {
       _pXtc = Pds::CompressedXtc::uncompress(*xtc);
-      _frame = reinterpret_cast<Pds::Camera::FrameV1*>(_pXtc->payload());
+      _frame->set_frame(xtc->contains, _pXtc->payload());
     }
     else
-      _frame = reinterpret_cast<const Camera::FrameV1*>(xtc->payload());
+      _frame->set_frame(xtc->contains, xtc->payload());
   }
   else if (xtc->contains.id()==Pds::TypeId::Id_EvrData) {
     _evrdata = reinterpret_cast<Pds::EvrData::DataV3*>(xtc->payload());
+  }
+  else if (xtc->contains.id()==Pds::TypeId::Id_AlviumConfig &&
+      xtc->src.phy() == _fex.src().phy()) {
+    _frame = ::TimeTool::FrameCache::instance(xtc->contains, xtc->payload());
+  }
+  else if (xtc->contains.id()==Pds::TypeId::Id_Opal1kConfig &&
+      xtc->src.phy() == _fex.src().phy()) {
+    _frame = ::TimeTool::FrameCache::instance(xtc->contains, xtc->payload());
   }
   else if (xtc->src.level()==_fex.m_ipm_get_key.level() && 
 	   xtc->src.phy  ()==_fex.m_ipm_get_key.phy  () &&

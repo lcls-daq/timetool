@@ -10,9 +10,7 @@
 #include "pdsdata/xtc/DetInfo.hh"
 #include "pdsdata/xtc/ProcInfo.hh"
 
-#include "pdsdata/psddl/camera.ddl.h"
 #include "pdsdata/psddl/lusi.ddl.h"
-
 #include "pdsdata/psddl/epics.ddl.h"
 
 #include "pds/epicstools/PVWriter.hh"
@@ -24,7 +22,6 @@
 
 using std::string;
 
-typedef Pds::Opal1k::ConfigV1 Opal1kConfig;
 typedef Pds::EvrData::DataV3 EvrDataType;
 
 using namespace Pds;
@@ -153,9 +150,11 @@ namespace Pds {
 
 Pds_TimeTool_event::TimeToolC::TimeToolC() :
   _fex(NULL),
+  _frame(NULL),
   _ref_path(NULL),
   _write_ref_auto(true),
-  _verbose(false)
+  _verbose(false),
+  _use_xtc_cfg(false)
 {}
 
 Pds_TimeTool_event::TimeToolC::TimeToolC(const Pds::Src& src,
@@ -164,9 +163,11 @@ Pds_TimeTool_event::TimeToolC::TimeToolC(const Pds::Src& src,
                                          const char* ref_path) :
   _src(src),
   _fex(NULL),
+  _frame(NULL),
   _ref_path(ref_path),
   _write_ref_auto(write_ref_auto),
-  _verbose(verbose)
+  _verbose(verbose),
+  _use_xtc_cfg(true)
 {}
 
 Pds_TimeTool_event::TimeToolC::TimeToolC(const char* filename,
@@ -174,23 +175,25 @@ Pds_TimeTool_event::TimeToolC::TimeToolC(const char* filename,
                                          bool verbose,
                                          const char* ref_path) :
   _fex(new ::TimeTool::Fex(filename, write_ref_auto, verbose, ref_path)),
+  _frame(NULL),
   _ref_path(ref_path),
   _write_ref_auto(write_ref_auto),
-  _verbose(verbose)
-{}
+  _verbose(verbose),
+  _use_xtc_cfg(false)
+{
+  _fex->configure();
+  _src = _fex->src();
+}
 
 Pds_TimeTool_event::TimeToolC::~TimeToolC()
 {
   if (_fex) delete _fex;
+  if (_frame) delete _frame;
 }
 
 Transition* Pds_TimeTool_event::TimeToolC::transitions(Transition* tr) 
 {
-  if (tr->id()==TransitionId::Configure) {
-    if (_fex)
-      _fex->configure();
-  }
-  else if (tr->id()==TransitionId::Unconfigure) {
+  if (tr->id()==TransitionId::Unconfigure) {
     if (_fex)
       _fex->unconfigure();
   }
@@ -207,15 +210,16 @@ InDatagram* Pds_TimeTool_event::TimeToolC::events(InDatagram* dg)
       if (_fex) {
         _fex->reset();
         
-        _frame = 0;
+        if (_frame)
+          _frame->clear_frame();
         _evrdata = 0;
         _ipmdata = 0;
 
         iterate(&dg->xtc);
 
-        if (_frame && _evrdata) {
+        if (_frame && !_frame->empty() && _evrdata) {
 
-          _fex->analyze(_frame->data16(),
+          _fex->analyze(_frame->data(),
                         _trimfifoEvents(dg->datagram().seq.stamp().fiducials(),_evrdata),
                         _ipmdata);
 
@@ -265,35 +269,50 @@ int Pds_TimeTool_event::TimeToolC::process(Xtc* xtc)
 {
   if (xtc->contains.id()==TypeId::Id_Xtc) 
     iterate(xtc);
+  else if (xtc->contains.id()==TypeId::Id_VimbaFrame &&
+     xtc->src.phy() == _src.phy()) {
+    _frame->set_frame(xtc->contains, xtc->payload());
+  }
   else if (xtc->contains.id()==TypeId::Id_Frame && 
-	   xtc->src.phy() == (_fex ? _fex->src().phy(): 0)) {
+	   xtc->src.phy() == _src.phy()) {
     if (xtc->contains.compressed()) {
       _pXtc = Pds::CompressedXtc::uncompress(*xtc);
-      _frame = reinterpret_cast<Pds::Camera::FrameV1*>(_pXtc->payload());
+      _frame->set_frame(xtc->contains, _pXtc->payload());
     }
     else
-      _frame = reinterpret_cast<const Camera::FrameV1*>(xtc->payload());
+      _frame->set_frame(xtc->contains, xtc->payload());
   }
   else if (xtc->contains.id()==Pds::TypeId::Id_EvrData) {
     _evrdata = reinterpret_cast<Pds::EvrData::DataV3*>(xtc->payload());
   }
-  else if (xtc->contains.id()==Pds::TypeId::Id_TimeToolConfig &&
+  else if (xtc->contains.id()==Pds::TypeId::Id_AlviumConfig &&
       xtc->src.phy() == _src.phy()) {
+    _frame = ::TimeTool::FrameCache::instance(xtc->contains, xtc->payload());
+  }
+  else if (xtc->contains.id()==Pds::TypeId::Id_Opal1kConfig &&
+      xtc->src.phy() == _src.phy()) {
+    _frame = ::TimeTool::FrameCache::instance(xtc->contains, xtc->payload());
+  }
+  else if (xtc->contains.id()==Pds::TypeId::Id_TimeToolConfig &&
+      xtc->src.phy() == _src.phy() && _use_xtc_cfg) {
     printf("Found conf\n");
     switch (xtc->contains.version()) {
       case 1:
         { Pds::TimeTool::ConfigV1* cfg = 
             reinterpret_cast<Pds::TimeTool::ConfigV1*>(xtc->payload());
+          if (_fex) delete _fex;
           _fex = new ::TimeTool::Fex(_src, *cfg, _write_ref_auto, _verbose, _ref_path); }
         break;
       case 2:
         { Pds::TimeTool::ConfigV2* cfg = 
             reinterpret_cast<Pds::TimeTool::ConfigV2*>(xtc->payload());
+          if (_fex) delete _fex;
           _fex = new ::TimeTool::Fex(_src, *cfg, _write_ref_auto, _verbose, _ref_path); }
         break;
       case 3:
         { Pds::TimeTool::ConfigV3* cfg = 
             reinterpret_cast<Pds::TimeTool::ConfigV3*>(xtc->payload());
+          if (_fex) delete _fex;
           _fex = new ::TimeTool::Fex(_src, *cfg, _write_ref_auto, _verbose, _ref_path); }
         break;
       default:
