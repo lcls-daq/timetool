@@ -180,10 +180,7 @@ Pds_TimeTool_event::TimeToolC::TimeToolC(const char* filename,
   _write_ref_auto(write_ref_auto),
   _verbose(verbose),
   _use_xtc_cfg(false)
-{
-  _fex->configure();
-  _src = _fex->src();
-}
+{}
 
 Pds_TimeTool_event::TimeToolC::~TimeToolC()
 {
@@ -193,7 +190,13 @@ Pds_TimeTool_event::TimeToolC::~TimeToolC()
 
 Transition* Pds_TimeTool_event::TimeToolC::transitions(Transition* tr) 
 {
-  if (tr->id()==TransitionId::Unconfigure) {
+  if (tr->id()==TransitionId::Configure) {
+    if (_fex && !_use_xtc_cfg) {
+      _fex->configure();
+      _src = _fex->src();
+    }
+  }
+  else if (tr->id()==TransitionId::Unconfigure) {
     if (_fex)
       _fex->unconfigure();
   }
@@ -287,11 +290,11 @@ int Pds_TimeTool_event::TimeToolC::process(Xtc* xtc)
   }
   else if (xtc->contains.id()==Pds::TypeId::Id_AlviumConfig &&
       xtc->src.phy() == _src.phy()) {
-    _frame = ::TimeTool::FrameCache::instance(xtc->contains, xtc->payload());
+    _frame = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
   }
   else if (xtc->contains.id()==Pds::TypeId::Id_Opal1kConfig &&
       xtc->src.phy() == _src.phy()) {
-    _frame = ::TimeTool::FrameCache::instance(xtc->contains, xtc->payload());
+    _frame = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
   }
   else if (xtc->contains.id()==Pds::TypeId::Id_TimeToolConfig &&
       xtc->src.phy() == _src.phy() && _use_xtc_cfg) {

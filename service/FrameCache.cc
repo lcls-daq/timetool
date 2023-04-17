@@ -6,7 +6,8 @@
 
 using namespace TimeTool;
 
-FrameCache* FrameCache::instance(Pds::TypeId config_type,
+FrameCache* FrameCache::instance(Pds::Src src,
+                                 Pds::TypeId config_type,
                                  const void* config_payload)
 {
   FrameCache* frame = 0;
@@ -15,12 +16,13 @@ FrameCache* FrameCache::instance(Pds::TypeId config_type,
     switch(config_type.version()) {
     case 1:
       frame = new VimbaFrameCache<Pds::Vimba::AlviumConfigV1, VimbaDataType>(
+          src,
           reinterpret_cast<const Pds::Vimba::AlviumConfigV1*>(config_payload));
       break;
     default: break;
     } break;
   case Pds::TypeId::Id_Opal1kConfig:
-    frame = new OpalFrameCache<Pds::Camera::FrameV1>();
+    frame = new OpalFrameCache<Pds::Camera::FrameV1>(src);
     break;
   default: break;
   }
@@ -28,8 +30,18 @@ FrameCache* FrameCache::instance(Pds::TypeId config_type,
   return frame;
 }
 
+FrameCache::FrameCache(Pds::Src src) :
+  _src(src)
+{}
+
+const Pds::Src& FrameCache::src() const
+{
+  return _src;
+}
+
 template<class Data>
-OpalFrameCache<Data>::OpalFrameCache() :
+OpalFrameCache<Data>::OpalFrameCache(Pds::Src src) :
+  FrameCache(src),
   _frame(NULL)
 {}
 
@@ -65,13 +77,20 @@ void OpalFrameCache<Data>::clear_frame()
 }
 
 template<class Data>
-bool OpalFrameCache<Data>::empty()
+bool OpalFrameCache<Data>::empty() const
 {
   return _frame == NULL;
 }
 
+template<class Data>
+uint32_t OpalFrameCache<Data>::offset() const
+{
+  return _frame ? _frame->offset() : 0;
+}
+
 template<class Cfg, class Data>
-VimbaFrameCache<Cfg,Data>::VimbaFrameCache(const Cfg* config) :
+VimbaFrameCache<Cfg,Data>::VimbaFrameCache(Pds::Src src, const Cfg* config) :
+  FrameCache(src),
   _config_buffer(new char[config->_sizeof()]),
   _config(new (_config_buffer) Cfg(*config)),
   _frame(NULL)
@@ -114,7 +133,13 @@ void VimbaFrameCache<Cfg,Data>::clear_frame()
 }
 
 template<class Cfg, class Data>
-bool VimbaFrameCache<Cfg,Data>::empty()
+bool VimbaFrameCache<Cfg,Data>::empty() const
 {
   return _frame == NULL;
+}
+
+template<class Cfg, class Data>
+uint32_t VimbaFrameCache<Cfg,Data>::offset() const
+{
+  return 0;
 }

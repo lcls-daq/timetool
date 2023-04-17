@@ -152,9 +152,7 @@ namespace Pds {
 Pds_TimeTool_event::TimeToolA::TimeToolA() :
   _fex("timetool.input"),
   _frame(NULL)
-{
-  _fex.configure();
-}
+{}
 
 Pds_TimeTool_event::TimeToolA::~TimeToolA()
 {
@@ -163,7 +161,10 @@ Pds_TimeTool_event::TimeToolA::~TimeToolA()
 
 Transition* Pds_TimeTool_event::TimeToolA::transitions(Transition* tr) 
 {
-  if (tr->id()==TransitionId::Unconfigure) {
+  if (tr->id()==TransitionId::Configure) {
+    _fex.configure();
+  }
+  else if (tr->id()==TransitionId::Unconfigure) {
     _fex.unconfigure();
   }
   return tr;
@@ -250,11 +251,11 @@ int Pds_TimeTool_event::TimeToolA::process(Xtc* xtc)
   }
   else if (xtc->contains.id()==Pds::TypeId::Id_AlviumConfig &&
       xtc->src.phy() == _fex.src().phy()) {
-    _frame = ::TimeTool::FrameCache::instance(xtc->contains, xtc->payload());
+    _frame = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
   }
   else if (xtc->contains.id()==Pds::TypeId::Id_Opal1kConfig &&
       xtc->src.phy() == _fex.src().phy()) {
-    _frame = ::TimeTool::FrameCache::instance(xtc->contains, xtc->payload());
+    _frame = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
   }
   else if (xtc->src.level()==_fex.m_ipm_get_key.level() && 
 	   xtc->src.phy  ()==_fex.m_ipm_get_key.phy  () &&

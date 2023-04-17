@@ -29,6 +29,7 @@
 #include "psalg/psalg.h"
 
 #include "timetool/service/Fex.hh"
+#include "timetool/service/FrameCache.hh"
 
 #include "cadef.h"
 
@@ -46,6 +47,9 @@ using std::string;
 
 typedef Pds::Opal1k::ConfigV1 Opal1kConfig;
 typedef Pds::EvrData::DataV3 EvrDataType;
+typedef std::vector<TimeTool::FrameCache*> FrameCacheVec;
+typedef std::map<Pds::Src, TimeTool::FrameCache*> FrameCacheMap;
+typedef FrameCacheMap::iterator FrameCacheIter;
 
 using namespace Pds;
 
@@ -140,11 +144,20 @@ namespace Pds {
     Transition* transitions(Transition* tr) {
       if (tr->id()==TransitionId::Unconfigure) {
         for(unsigned i=0; i<_fex.size(); i++) {
-          _fex[i]->_write_ref();
-          delete _fex[i];
+          if (_fex[i]) {
+            _fex[i]->_write_ref();
+            delete _fex[i];
+          }
+          if (_frame[i])
+            delete _frame[i];
         }
         _fex  .clear();
         _frame.clear();
+        for(FrameCacheIter it=_tmp.begin(); it!=_tmp.end(); ++it) {
+          if (it->second)
+            delete it->second;
+        }
+        _tmp.clear();
       }
       return tr;
     }
@@ -153,7 +166,8 @@ namespace Pds {
       case TransitionId::L1Accept:
         {
           for(unsigned i=0; i<_fex.size(); i++)
-            _frame[i] = 0;
+            if (_frame[i])
+              _frame[i]->clear_frame();
           
           const Src& src = reinterpret_cast<Xtc*>(dg->xtc.payload())->src;
           
@@ -172,12 +186,12 @@ namespace Pds {
                                               v[i+1]);
 
           for(unsigned i=0; i<_fex.size(); i++) {
-            if (_frame[i]) {
+            if (_frame[i] && !_frame[i]->empty()) {
               Fex& fex = *_fex[i];
               fex.reset();
               
               fex.m_pedestal = _frame[i]->offset();
-              fex.analyze(_frame[i]->data16(), fifo, 0);
+              fex.analyze(_frame[i]->data(), fifo, 0);
                           
               // assumes only one fex per event
               if (!fex.write_image()) {
@@ -227,6 +241,12 @@ namespace Pds {
       case TransitionId::Configure:
         _dg = dg;
         iterate(&dg->xtc);
+        // clean up tmp frame cache
+        for(FrameCacheIter it=_tmp.begin(); it!=_tmp.end(); ++it) {
+          if (it->second)
+            delete it->second;
+        }
+        _tmp.clear();
         break;
       default:
         break;
@@ -237,39 +257,66 @@ namespace Pds {
     int process(Xtc* xtc) {
       if (xtc->contains.id()==TypeId::Id_Xtc) 
         iterate(xtc);
+      else if (xtc->contains.id()==TypeId::Id_VimbaFrame) {
+        for(unsigned i=0; i<_fex.size(); i++)
+          if (_fex[i]->m_get_key == xtc->src.phy()) {
+            _frame[i]->set_frame(xtc->contains, xtc->payload());
+          }
+      }
       else if (xtc->contains.id()==TypeId::Id_Frame) {
         for(unsigned i=0; i<_fex.size(); i++)
           if (_fex[i]->m_get_key == xtc->src.phy()) {
             if (xtc->contains.compressed()) {
               _pXtc [i] = Pds::CompressedXtc::uncompress(*xtc);
-              _frame[i] = reinterpret_cast<Pds::Camera::FrameV1*>(_pXtc[i]->payload());
+              _frame[i]->set_frame(xtc->contains, _pXtc[i]->payload());
             }
             else
-              _frame[i] = reinterpret_cast<const Camera::FrameV1*>(xtc->payload());
+              _frame[i]->set_frame(xtc->contains, xtc->payload());
           }
       }
+      else if (xtc->contains.id()==Pds::TypeId::Id_AlviumConfig ||
+               xtc->contains.id()==Pds::TypeId::Id_Opal1kConfig) {
+        bool found = false;
+        for(unsigned i=0; i<_fex.size(); i++)
+          if (_fex[i]->m_get_key == xtc->src.phy()) {
+            _frame[i] = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
+          }
+        if (!found) {
+          _tmp[xtc->src] = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
+        }
+      }
+
       else if (xtc->contains.id()==TypeId::Id_TimeToolConfig) {
-        Fex& fex = *new Fex(xtc->src,
-                            *reinterpret_cast<const TimeToolConfigType*>(xtc->payload()));
-        fex._enable_write_ref();
+        Fex* fex = new Fex(xtc->src,
+                           *reinterpret_cast<const TimeToolConfigType*>(xtc->payload()));
+        fex->_enable_write_ref();
 
         InDatagram* dg = _dg;
         const Src& src = xtc->src;
-        _insert_pv(dg, src, 0, fex.base_name()+":AMPL");
-        _insert_pv(dg, src, 1, fex.base_name()+":FLTPOS");
-        _insert_pv(dg, src, 2, fex.base_name()+":FLTPOS_PS");
-        _insert_pv(dg, src, 3, fex.base_name()+":FLTPOSFWHM");
-        _insert_pv(dg, src, 4, fex.base_name()+":AMPLNXT");
-        _insert_pv(dg, src, 5, fex.base_name()+":REFAMPL");
+        _insert_pv(dg, src, 0, fex->base_name()+":AMPL");
+        _insert_pv(dg, src, 1, fex->base_name()+":FLTPOS");
+        _insert_pv(dg, src, 2, fex->base_name()+":FLTPOS_PS");
+        _insert_pv(dg, src, 3, fex->base_name()+":FLTPOSFWHM");
+        _insert_pv(dg, src, 4, fex->base_name()+":AMPLNXT");
+        _insert_pv(dg, src, 5, fex->base_name()+":REFAMPL");
 
-        _fex  .push_back(&fex);
-        _frame.push_back(0);
+        _fex  .push_back(fex);
+        FrameCacheIter it = _tmp.find(fex->src());
+        if (it != _tmp.end()) {
+          // add framecache to vector
+          _frame.push_back(it->second);
+          // remove framecache from tmp map
+          _tmp.erase(it);
+        } else {
+          _frame.push_back(0);
+        }
       }
       return 1;
     }
   private:
-    std::vector<Fex*>                   _fex;
-    std::vector<const Camera::FrameV1*> _frame;
+    std::vector<Fex*> _fex;
+    FrameCacheVec     _frame;
+    FrameCacheMap     _tmp;
     std::vector<boost::shared_ptr<Pds::Xtc> > _pXtc;
     InDatagram* _dg;
   };
