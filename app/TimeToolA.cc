@@ -25,6 +25,7 @@
 
 #include "pds/epicstools/PVWriter.hh"
 #include "timetool/service/Fex.hh"
+#include "timetool/service/FrameCache.hh"
 
 #include <math.h>
 #include <stdlib.h>
@@ -163,6 +164,8 @@ namespace Pds {
     ~FexApp() {
       for(unsigned i=0; i<_fex.size(); i++) {
         delete _fex[i];
+        if (_frame[i])
+          delete _frame[i];
         if (_pv_writer[i])
           delete _pv_writer[i];
       }
@@ -220,18 +223,19 @@ namespace Pds {
       case TransitionId::L1Accept:
         { //  Add an encoder data object
           for(unsigned i=0; i<_fex.size(); i++)
-            _frame[i] = 0;
+            if (_frame[i])
+              _frame[i]->clear_frame();
           
           const Src& src = reinterpret_cast<Xtc*>(dg->xtc.payload())->src;
           
           iterate(&dg->xtc);
           
           for(unsigned i=0; i<_fex.size(); i++) {
-            if (_frame[i]) {
+            if (_frame[i] && !_frame[i]->empty()) {
               ::TimeTool::Fex& fex = *_fex[i];
               fex.reset();
               fex.m_pedestal = _frame[i]->offset();
-              fex.analyze(_frame[i]->data16(), fifo, 0);
+              fex.analyze(_frame[i]->data(), fifo, 0);
                           
               // assumes only one fex per event
               if (!fex.write_image()) {
@@ -271,18 +275,25 @@ namespace Pds {
     int process(Xtc* xtc) {
       if (xtc->contains.id()==TypeId::Id_Xtc) 
         iterate(xtc);
+      else if (xtc->contains.id()==TypeId::Id_VimbaFrame) {
+        for(unsigned i=0; i<_fex.size(); i++)
+          if (_fex[i]->m_get_key == xtc->src.phy()) {
+            _frame[i]->set_frame(xtc->contains, xtc->payload());
+          }
+      }
       else if (xtc->contains.id()==TypeId::Id_Frame) {
         for(unsigned i=0; i<_fex.size(); i++)
           if (_fex[i]->m_get_key == xtc->src.phy()) {
             if (xtc->contains.compressed()) {
               _pXtc [i] = Pds::CompressedXtc::uncompress(*xtc);
-              _frame[i] = reinterpret_cast<Pds::Camera::FrameV1*>(_pXtc[i]->payload());
+              _frame[i]->set_frame(xtc->contains, _pXtc[i]->payload());
             }
             else
-              _frame[i] = reinterpret_cast<const Camera::FrameV1*>(xtc->payload());
+              _frame[i]->set_frame(xtc->contains, xtc->payload());
           }
       }
-      else if (xtc->contains.id()==TypeId::Id_Opal1kConfig) {
+      else if (xtc->contains.id()==TypeId::Id_Opal1kConfig ||
+               xtc->contains.id()==Pds::TypeId::Id_AlviumConfig) {
         for(unsigned i=0; i<_fex.size(); i++) {
           ::TimeTool::Fex& fex = *_fex[i];
           if (fex.m_get_key == xtc->src.phy()) {
@@ -295,17 +306,19 @@ namespace Pds {
             _insert_pv(dg, src, 3, fex.base_name()+":FLTPOSFWHM");
             _insert_pv(dg, src, 4, fex.base_name()+":AMPLNXT");
             _insert_pv(dg, src, 5, fex.base_name()+":REFAMPL");
+            // create frame cache
+            _frame[i] = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
           }
         }
       }
       return 1;
     }
   private:
-    Appliance&                          _app;
-    GenericPool                         _occPool;
-    std::vector< ::TimeTool::Fex*     > _fex;
-    std::vector<const Camera::FrameV1*> _frame;
-    std::vector<PVWriter*             > _pv_writer;
+    Appliance&                            _app;
+    GenericPool                           _occPool;
+    std::vector< ::TimeTool::Fex*       > _fex;
+    std::vector< ::TimeTool::FrameCache*> _frame;
+    std::vector<PVWriter*               > _pv_writer;
     std::vector<boost::shared_ptr<Pds::Xtc> > _pXtc;
     unsigned  _adjust_n;
     double    _adjust_v;
