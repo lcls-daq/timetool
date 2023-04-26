@@ -29,6 +29,7 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <string>
 #include <new>
 #include <fstream>
@@ -143,9 +144,9 @@ namespace Pds {
       _occPool  (sizeof(UserMessage),4),
       _pv_writer(0) 
     {
-      char buff[128];
-      const char* dir = getenv("HOME");
-      sprintf(buff,"%s/%s", dir ? dir : "/tmp", fname);
+      char buff[PATH_MAX];
+      const char* dir = ::TimeTool::default_file_path();
+      sprintf(buff,"%s/%s", dir, fname);
       std::ifstream f(buff);
       if (f) {
         while(!f.eof()) {

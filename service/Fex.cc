@@ -18,7 +18,7 @@
 
 //#define DBUG
 
-static const char* default_ref_path()
+const char* TimeTool::default_file_path()
 {
   static char path[PATH_MAX];
   const char* hdir = getenv("HOME");
@@ -62,7 +62,7 @@ Fex::Fex(const char* fname,
          bool verbose,
          const char* ref_path) :
   _fname(fname+strspn(fname," \t")),
-  _ref_path(ref_path ? ref_path : default_ref_path()),
+  _ref_path(ref_path ? ref_path : default_file_path()),
   _write_ref_auto(write_ref_auto),
   _fitter(new Fitter(verbose))
 {
@@ -73,7 +73,7 @@ Fex::Fex(const Pds::Src& src,
          bool write_ref_auto,
          bool verbose,
          const char* ref_path) :
-  _ref_path(ref_path ? ref_path : default_ref_path()),
+  _ref_path(ref_path ? ref_path : default_file_path()),
   _write_ref_auto(write_ref_auto),
   _fitter(new Fitter(verbose))
 {
@@ -179,7 +179,7 @@ Fex::Fex(const Pds::Src& src,
          bool write_ref_auto,
          bool verbose,
          const char* ref_path) :
-  _ref_path(ref_path ? ref_path : default_ref_path()),
+  _ref_path(ref_path ? ref_path : default_file_path()),
   _write_ref_auto(write_ref_auto),
   _fitter(new Fitter(verbose))
 {
@@ -296,7 +296,7 @@ Fex::Fex(const Pds::Src& src,
          bool write_ref_auto,
          bool verbose,
          const char* ref_path) :
-  _ref_path(ref_path ? ref_path : default_ref_path()),
+  _ref_path(ref_path ? ref_path : default_file_path()),
   _write_ref_auto(write_ref_auto),
   _fitter(new Fitter(verbose))
 {
@@ -462,8 +462,8 @@ void Fex::configure()
   if (_fname[0]=='/')
     strcpy(buff,_fname.c_str());
   else {
-    const char* dir = getenv("HOME");
-    sprintf(buff,"%s/%s", dir ? dir : "/tmp", _fname.c_str());
+    const char* dir = default_file_path();
+    sprintf(buff,"%s/%s", dir, _fname.c_str());
   }
 
   printf("TimeTool:Fex reading configuration from file %s\n",buff);

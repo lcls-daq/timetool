@@ -18,6 +18,7 @@ namespace Pds {
 };
 
 namespace TimeTool {
+  const char* default_file_path();
   class Fitter;
   class Fex {
   public:
