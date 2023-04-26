@@ -280,6 +280,7 @@ namespace Pds {
         for(unsigned i=0; i<_fex.size(); i++)
           if (_fex[i]->m_get_key == xtc->src.phy()) {
             _frame[i] = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
+            found = true;
           }
         if (!found) {
           _tmp[xtc->src] = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
