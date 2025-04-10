@@ -257,6 +257,7 @@ namespace Pds {
               _insert_pv(dg, src, 3, fex.filtered_fwhm ());
               _insert_pv(dg, src, 4, fex.next_amplitude());
               _insert_pv(dg, src, 5, fex.ref_amplitude());
+              _insert_pv(dg, src, 6, fex.sig_roi_sum());
 
               break; 
             }
@@ -307,6 +308,7 @@ namespace Pds {
             _insert_pv(dg, src, 3, fex.base_name()+":FLTPOSFWHM");
             _insert_pv(dg, src, 4, fex.base_name()+":AMPLNXT");
             _insert_pv(dg, src, 5, fex.base_name()+":REFAMPL");
+            _insert_pv(dg, src, 6, fex.base_name()+":SIGROISUM");
             // create frame cache
             _frame[i] = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
           }

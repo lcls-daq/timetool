@@ -211,6 +211,7 @@ InDatagram* Pds_TimeTool_event::TimeToolA::events(InDatagram* dg)
       _insert_pv(dg, src, 3, _fex.filtered_fwhm ());
       _insert_pv(dg, src, 4, _fex.next_amplitude());
       _insert_pv(dg, src, 5, _fex.ref_amplitude());
+      _insert_pv(dg, src, 6, _fex.sig_roi_sum());
 
       break; }
   case TransitionId::Configure:
@@ -221,6 +222,7 @@ InDatagram* Pds_TimeTool_event::TimeToolA::events(InDatagram* dg)
       _insert_pv(dg, src, 3, _fex.base_name()+":FLTPOSFWHM");
       _insert_pv(dg, src, 4, _fex.base_name()+":AMPLNXT");
       _insert_pv(dg, src, 5, _fex.base_name()+":REFAMPL");
+      _insert_pv(dg, src, 6, _fex.base_name()+":SIGROISUM");
       break; }
   default:
     break;

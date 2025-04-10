@@ -56,6 +56,10 @@ static ndarray<double,1> load_reference(unsigned key, unsigned sz, const char* d
 
 static ndarray<double,2> load_reference(unsigned key, unsigned row_sz, unsigned col_sz, const char* dir);
 
+static double sum_array(const ndarray<const int,1>& data);
+
+static double sum_array(const ndarray<const int,2>& data);
+
 
 Fex::Fex(const char* fname,
          bool write_ref_auto,
@@ -720,6 +724,7 @@ void Fex::reset()
   _amplitude     = 0;
   _ref_amplitude = 0;
   _nxt_amplitude = -1;
+  _sig_roi_sum   = 0;
 }
 
 static bool _calculate_logic(const ndarray<const Pds::TimeTool::EventLogic,1>& cfg,
@@ -834,6 +839,11 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
                             m_sig_roi_hi,
                             m_pedestal);
     //
+    //  Calculate sum of signal roi and store
+    //
+    _sig_roi_sum = sum_array(m_sig_full);
+
+    //
     //  Calculate sideband correction
     //
     if (m_use_sb_roi)
@@ -858,6 +868,11 @@ void Fex::analyze(const ndarray<const uint16_t,2>& f,
                            m_sig_roi_lo,
                            m_sig_roi_hi,
                            m_pedestal, pdim);
+
+    //
+    //  Calculate sum of signal roi and store
+    //
+    _sig_roi_sum = sum_array(m_sig);
 
     //
     //  Calculate sideband correction
@@ -1124,6 +1139,11 @@ void Fex::analyze(EventType etype,
   ndarray<double,1> sigd = make_ndarray<double>(m_sig.shape()[0]);
 
   //
+  //  Calculate sum of signal roi and store
+  //
+  _sig_roi_sum = sum_array(m_sig);
+
+  //
   //  Correct projection for common mode found in sideband
   //
   if (m_sb.size()) {
@@ -1270,6 +1290,11 @@ void Fex::analyze(EventType etype,
   m_sb_full  = sideband;
 
   ndarray<double,2> sigd_full = make_ndarray<double>(m_sig_full.shape()[0],m_sig_full.shape()[1]);
+
+  //
+  //  Calculate sum of signal roi and store
+  //
+  _sig_roi_sum = sum_array(m_sig_full);
 
   //
   //  Correct projection for common mode found in sideband
@@ -1434,6 +1459,11 @@ void Fex::analyze(EventType etype,
   ndarray<double,1> refd = make_ndarray<double>(m_sig.shape()[0]);
 
   //
+  //  Calculate sum of signal roi and store
+  //
+  _sig_roi_sum = sum_array(m_sig);
+
+  //
   //  Correct projection for common mode found in sideband
   //
   if (m_sb.size()) {
@@ -1587,6 +1617,11 @@ void Fex::analyze(EventType etype,
 
   ndarray<double,2> sigd_full = make_ndarray<double>(m_sig_full.shape()[0],m_sig_full.shape()[1]);
   ndarray<double,2> refd_full = make_ndarray<double>(m_sig_full.shape()[0],m_sig_full.shape()[1]);
+
+  //
+  //  Calculate sum of signal roi and store
+  //
+  _sig_roi_sum = sum_array(m_sig_full);
 
   //
   //  Correct projection for common mode found in sideband
@@ -1786,4 +1821,22 @@ ndarray<double,2> load_reference(unsigned key, unsigned row_sz, unsigned col_sz,
     }
   }
   return m_ref_avg;
+}
+
+double sum_array(const ndarray<const int,1>& data)
+{
+  double result = 0.0;
+  for(const int* a=data.begin(); a!=data.end(); a++) {
+    result += *a;
+  }
+  return result;
+}
+
+double sum_array(const ndarray<const int,2>& data)
+{
+  double result = 0.0;
+  for(const int* a=data.begin(); a!=data.end(); a++) {
+    result += *a;
+  }
+  return result;
 }

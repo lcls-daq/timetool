@@ -76,6 +76,7 @@ namespace TimeTool {
     double amplitude        () const { return _amplitude; }
     double next_amplitude   () const { return _nxt_amplitude; }
     double ref_amplitude    () const { return _ref_amplitude; }
+    double sig_roi_sum      () const { return _sig_roi_sum; }
     bool   status   () const { return _flt_fwhm>0; }
   public:
     bool   use_full_roi     () const { return m_use_full_roi; }
@@ -170,6 +171,7 @@ namespace TimeTool {
     double _amplitude;
     double _nxt_amplitude;
     double _ref_amplitude;
+    double _sig_roi_sum;
 
     int _indicator_offset;
 
