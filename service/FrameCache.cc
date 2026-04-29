@@ -3,6 +3,10 @@
 #include "pds/config/Opal1kConfigType.hh"
 #include "pds/config/VimbaConfigType.hh"
 #include "pds/config/VimbaDataType.hh"
+#include "pds/config/ZylaConfigType.hh"
+#include "pds/config/ZylaDataType.hh"
+#include "pds/config/EpicsCamConfigType.hh"
+#include "pds/config/EpicsCamDataType.hh"
 
 using namespace TimeTool;
 
@@ -21,6 +25,16 @@ FrameCache* FrameCache::instance(Pds::Src src,
       break;
     default: break;
     } break;
+  case Pds::TypeId::Id_ZylaConfig:
+    switch(config_type.version()) {
+    case 1:
+      frame = new VimbaFrameCache<Pds::Zyla::ConfigV1, ZylaDataType>(
+          src,reinterpret_cast<const Pds::Zyla::ConfigV1*>(config_payload));
+    default: break;
+    } break;
+  case Pds::TypeId::Id_ControlsCameraConfig:
+    frame = new OpalFrameCache<EpicsCamDataType>(src);
+    break;
   case Pds::TypeId::Id_Opal1kConfig:
     frame = new OpalFrameCache<Pds::Camera::FrameV1>(src);
     break;

@@ -239,6 +239,10 @@ int Pds_TimeTool_event::TimeToolA::process(Xtc* xtc)
      xtc->src.phy() == _fex.src().phy()) {
     _frame->set_frame(xtc->contains, xtc->payload());
   }
+  else if (xtc->contains.id()==TypeId::Id_ZylaFrame &&
+     xtc->src.phy() == _fex.src().phy()) {
+    _frame->set_frame(xtc->contains, xtc->payload());
+  }
   else if (xtc->contains.id()==TypeId::Id_Frame && 
 	   xtc->src.phy() == _fex.src().phy()) {
     if (xtc->contains.compressed()) {
@@ -252,6 +256,14 @@ int Pds_TimeTool_event::TimeToolA::process(Xtc* xtc)
     _evrdata = reinterpret_cast<Pds::EvrData::DataV3*>(xtc->payload());
   }
   else if (xtc->contains.id()==Pds::TypeId::Id_AlviumConfig &&
+      xtc->src.phy() == _fex.src().phy()) {
+    _frame = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
+  }
+  else if (xtc->contains.id()==Pds::TypeId::Id_ZylaConfig &&
+      xtc->src.phy() == _fex.src().phy()) {
+    _frame = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
+  }
+  else if (xtc->contains.id()==Pds::TypeId::Id_ControlsCameraConfig &&
       xtc->src.phy() == _fex.src().phy()) {
     _frame = ::TimeTool::FrameCache::instance(xtc->src, xtc->contains, xtc->payload());
   }

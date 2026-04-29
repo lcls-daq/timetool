@@ -46,6 +46,8 @@ int ConfigHandler::process(Xtc* xtc)
     iterate(xtc);
     break;
   case TypeId::Id_Opal1kConfig:
+  case TypeId::Id_ControlsCameraConfig:
+  case TypeId::Id_ZylaConfig:
   case TypeId::Id_AlviumConfig:
     _xtc.push_back(Xtc(_timetoolConfigType,xtc->src));
 			   

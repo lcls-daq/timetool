@@ -259,6 +259,12 @@ namespace Pds {
             _frame[i]->set_frame(xtc->contains, xtc->payload());
           }
       }
+      else if (xtc->contains.id()==TypeId::Id_ZylaFrame) {
+        for(unsigned i=0; i<_fex.size(); i++)
+          if (_fex[i]->m_get_key == xtc->src.phy()) {
+            _frame[i]->set_frame(xtc->contains, xtc->payload());
+          }
+      }
       else if (xtc->contains.id()==TypeId::Id_Frame) {
         for(unsigned i=0; i<_fex.size(); i++)
           if (_fex[i]->m_get_key == xtc->src.phy()) {
@@ -270,7 +276,10 @@ namespace Pds {
               _frame[i]->set_frame(xtc->contains, xtc->payload());
           }
       }
-      else if (xtc->contains.id()==TypeId::Id_Opal1kConfig) {
+      else if (xtc->contains.id()==TypeId::Id_Opal1kConfig ||
+               xtc->contains.id()==TypeId::Id_ControlsCameraConfig ||
+               xtc->contains.id()==TypeId::Id_ZylaConfig ||
+               xtc->contains.id()==Pds::TypeId::Id_AlviumConfig) {
         for(unsigned i=0; i<_fex.size(); i++) {
           ::TimeTool::Fex& fex = *_fex[i];
           if (fex.m_get_key == xtc->src.phy()) {
